@@ -1,0 +1,73 @@
+# Development scripts
+
+These compare `shuriken` against a real `ninja` binary. They are not part of the
+crate and are not run by `cargo test`; they need `ninja` on `PATH` (1.13.x, and
+a C compiler for `realtest.py`).
+
+Build the release binary first:
+
+```sh
+cargo build --release
+```
+
+## `difftest.py` — behavioural differential suite
+
+```sh
+python3 dev/difftest.py target/release/shuriken
+```
+
+Runs 85 scenarios through both tools in identical temporary trees and compares:
+
+* exit codes,
+* stdout and stderr (normalised for the program name, timings, and — for
+  parallel steps — completion order),
+* every file produced,
+* `.ninja_log` entries (output path → command hash, so hash compatibility is
+  checked directly),
+* `.ninja_deps` structure (paths and dependency lists, decoded from the binary
+  format).
+
+It also checks log interop in both directions: ninja builds a tree and shuriken
+must then report "no work to do" in it, and vice versa, including a
+deps-triggered rebuild after touching a header.
+
+Scenarios cover builds and rebuilds, failures and `-k`, `restat`, `generator`
+and manifest regeneration, depfiles and `deps = gcc` / `deps = msvc`, dyndep,
+pools and the `console` pool, validations, response files, `builddir`, escaping,
+CRLF and Unicode paths, log and deps-log recompaction, every subtool, and 17
+kinds of malformed manifest.
+
+Output: `ran 85 scenarios + interop` / `all scenarios agree`.
+
+## `realtest.py` — a real C project
+
+```sh
+python3 dev/realtest.py target/release/shuriken
+```
+
+Generates a small C project (13 translation units, real headers, `gcc -MMD`
+depfiles), then drives both tools through the same sequence of edits — full
+build, no-op, touch a header, touch a shared header, edit a source file, change
+a compiler flag, clean, rebuild, delete an object, delete a header — and
+compares the exit code and the number of commands each tool ran at every step.
+Also prints a rough timing comparison.
+
+## `interrupt_test.py` — signals
+
+```sh
+python3 dev/interrupt_test.py target/release/shuriken
+```
+
+Starts a slow build, sends SIGINT (then SIGTERM) to the build tool, and checks
+that both tools agree on the exit code, on deleting the partially written
+output, and on removing `.ninja_lock`.
+
+## `bench.py` — timings
+
+```sh
+python3 dev/bench.py target/release/shuriken
+```
+
+Synthetic graphs (5k and 30k independent edges, a 2k-edge chain, and 3k edges
+with a 200-header deps log); reports full-build, no-op and `-t targets` times
+for both tools.

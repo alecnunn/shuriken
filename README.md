@@ -197,7 +197,8 @@ Synthetic graphs, best of several runs, 16-core Linux box, versus ninja 1.13.2
 
 A no-op build is dominated by `stat` calls, and a full build by process
 spawning, so both tools end up in the same place; shuriken's remaining gap is
-in graph walking, and its remaining edge is in command dispatch.
+in graph walking, and its remaining edge is in command dispatch. Peak memory on
+the 30,000-edge graph is 31 MB against ninja's 29 MB.
 
 ## How it is tested
 
@@ -216,8 +217,16 @@ in graph walking, and its remaining edge is in command dispatch.
   header).
 * Interrupt behaviour (SIGINT/SIGTERM) compared against ninja.
 
-The differential harness is not part of the crate; it lives in the development
-notes and needs a `ninja` binary on `PATH`.
+The differential harness lives in [`dev/`](dev/) and needs a `ninja` binary on
+`PATH`:
+
+```sh
+cargo build --release
+python3 dev/difftest.py target/release/shuriken      # 85 scenarios + log interop
+python3 dev/realtest.py target/release/shuriken      # a real C project, step by step
+python3 dev/interrupt_test.py target/release/shuriken
+python3 dev/bench.py target/release/shuriken
+```
 
 ## License
 
