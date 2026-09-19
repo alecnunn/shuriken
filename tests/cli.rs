@@ -400,6 +400,50 @@ fn pools_limit_concurrency() {
 }
 
 #[test]
+fn unlimited_parallelism_actually_runs_in_parallel() {
+    // 24 sleeps that would take about 2.4s serially.
+    let dir = TempDir::new("cli-jobs-zero");
+    let mut manifest = String::from("rule slow\n  command = sleep 0.1 && touch $out\n\n");
+    for i in 0..24 {
+        manifest.push_str(&format!("build o{i}: slow\n"));
+    }
+    manifest.push_str("build all: phony ");
+    for i in 0..24 {
+        manifest.push_str(&format!("o{i} "));
+    }
+    manifest.push_str("\ndefault all\n");
+    dir.write("build.ninja", &manifest);
+
+    let start = std::time::Instant::now();
+    let run = shuriken(&dir, &["-j0"]);
+    let elapsed = start.elapsed();
+    assert_eq!(run.code, 0, "{}", run.all());
+    assert!(
+        elapsed < std::time::Duration::from_millis(1200),
+        "-j0 should run everything at once, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn a_very_deep_chain_does_not_overflow_the_stack() {
+    // Scanning the graph recurses per edge; 20k deep would overflow a default
+    // 8MiB stack, so the tool runs the build on a larger one.
+    let dir = TempDir::new("cli-deep-chain");
+    let depth = 20_000;
+    let mut manifest = String::from("rule tch\n  command = touch $out\n\nbuild s0: tch in\n");
+    for i in 1..depth {
+        manifest.push_str(&format!("build s{i}: tch s{}\n", i - 1));
+    }
+    manifest.push_str(&format!("default s{}\n", depth - 1));
+    dir.write("build.ninja", &manifest);
+    dir.write("in", "x\n");
+
+    let run = shuriken(&dir, &["-n"]);
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    assert_eq!(commands_run(&run), depth);
+}
+
+#[test]
 fn console_pool_passes_output_through() {
     let dir = TempDir::new("cli-console");
     dir.write(

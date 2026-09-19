@@ -93,9 +93,41 @@ fn real_main() -> i32 {
         }
     }
 
-    match run(options, config) {
-        Ok(code) => code,
-        Err(e) => report_error(&e),
+    // Scanning the graph recurses once per dependency edge, so a very deep
+    // chain of targets can outgrow the default stack. Do the work on a thread
+    // with a large one; the pages are only touched if they are needed.
+    const BUILD_STACK_SIZE: usize = 256 * 1024 * 1024;
+    let worker = std::thread::Builder::new()
+        .name("shuriken-main".to_string())
+        .stack_size(BUILD_STACK_SIZE)
+        .spawn(move || run(options, config));
+
+    let outcome = match worker {
+        Ok(handle) => handle.join(),
+        // Without a thread, fall back to running inline.
+        Err(_) => return match run_inline() {
+            Ok(code) => code,
+            Err(e) => report_error(&e),
+        },
+    };
+
+    match outcome {
+        Ok(Ok(code)) => code,
+        Ok(Err(e)) => report_error(&e),
+        Err(_) => {
+            // The worker panicked; it has already printed the panic message.
+            2
+        }
+    }
+}
+
+/// Re-read the command line and run on the current thread. Only used if a
+/// thread cannot be spawned at all.
+fn run_inline() -> Result<i32> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match parse_args(&args) {
+        Parsed::Exit(code) => Ok(code as i32),
+        Parsed::Run(options, config) => run(options, config),
     }
 }
 

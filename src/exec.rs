@@ -169,7 +169,9 @@ impl RealCommandRunner {
         let (job_tx, job_rx) = channel();
         let (result_tx, result_rx) = channel();
         RealCommandRunner {
-            parallelism: parallelism.max(1),
+            // ninja caps "-j0" (no limit) at INT_MAX; keep the value in a range
+            // that stays positive when compared against a signed capacity.
+            parallelism: parallelism.clamp(1, i32::MAX as usize),
             max_load_average: -1.0,
             outstanding: 0,
             job_tx: Some(job_tx),
@@ -215,6 +217,10 @@ impl RealCommandRunner {
 
         let handle = std::thread::Builder::new()
             .name(name)
+            // Workers only launch a child, read a pipe and wait, so they need
+            // very little stack. Keeping it small matters when "-j0" asks for
+            // an unbounded number of them.
+            .stack_size(256 * 1024)
             .spawn(move || {
                 loop {
                     // Only one worker waits on the queue at a time; the rest
@@ -311,7 +317,13 @@ impl CommandRunner for RealCommandRunner {
 
         // Grow the pool only when every worker is busy.
         if self.idle.load(Ordering::SeqCst) == 0 && self.workers.len() < self.parallelism {
-            self.spawn_worker()?;
+            if let Err(e) = self.spawn_worker() {
+                // Out of threads: keep going with the workers we have, unless
+                // there are none at all and nothing could ever run.
+                if self.workers.is_empty() {
+                    return Err(e);
+                }
+            }
         }
 
         let job = Job {

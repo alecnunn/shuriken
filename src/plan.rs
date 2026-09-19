@@ -54,7 +54,7 @@ impl PartialOrd for ReadyKey {
 
 /// Ordering of edges delayed by a full pool: lightest first, then highest
 /// priority, matching ninja's `WeightedEdgeCmp`.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct DelayedKey {
     weight: i32,
     negated_critical_weight: i64,
@@ -235,7 +235,12 @@ impl Plan {
         let Some(delayed) = self.delayed.get_mut(&pool) else {
             return;
         };
-        let mut promoted: Vec<EdgeId> = Vec::new();
+
+        // Take the keys as they appear in the set rather than rebuilding them
+        // from the edge: an edge's critical-path weight can change after it was
+        // delayed (dyndep can extend the graph), and a rebuilt key would not
+        // match the stored one.
+        let mut promoted: Vec<DelayedKey> = Vec::new();
         {
             let depth = state.pool(pool).depth();
             let mut current_use = state.pool(pool).current_use();
@@ -244,20 +249,16 @@ impl Plan {
                     break;
                 }
                 current_use += key.weight;
-                promoted.push(EdgeId(key.id));
+                promoted.push(key.clone());
             }
         }
-        for edge in &promoted {
-            let key = DelayedKey {
-                weight: state.edge(*edge).weight(),
-                negated_critical_weight: -state.edge(*edge).critical_path_weight(),
-                id: edge.0,
-            };
-            self.delayed.get_mut(&pool).unwrap().remove(&key);
+        for key in &promoted {
+            delayed.remove(key);
         }
-        for edge in promoted {
-            let w = state.edge(edge).weight();
-            state.pool_mut(pool).edge_scheduled(w);
+
+        for key in promoted {
+            let edge = EdgeId(key.id);
+            state.pool_mut(pool).edge_scheduled(key.weight);
             self.push_ready(state, edge);
         }
     }
