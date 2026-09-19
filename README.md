@@ -175,7 +175,8 @@ Other differences worth knowing:
   Elsewhere it is ignored.
 * Commands run via `/bin/sh -c` on Unix and, as in ninja, are handed to
   `CreateProcess` without `cmd.exe` on Windows.
-* Windows support is written but has only been exercised on Unix so far.
+* Windows support is written and type-checks (`cargo check --target
+  x86_64-pc-windows-msvc`), but has only been *run* on Unix so far.
 * Deep dependency *chains* are handled better: the graph scan recurses per edge
   in both tools, but shuriken runs the build on a large stack, so a 60,000-deep
   chain builds where ninja 1.13.2 overflows its stack.
