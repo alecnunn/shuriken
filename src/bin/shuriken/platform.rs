@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(unix)]
+use std::sync::atomic::Ordering;
 
 static INTERRUPT_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
