@@ -200,7 +200,8 @@ impl<'a> DependencyScan<'a> {
         }
 
         // Stat the outputs so we can compare them against the newest input.
-        for o in self.state.edge(edge).outputs().to_vec() {
+        for i in 0..self.state.edge(edge).outputs().len() {
+            let o = self.state.edge(edge).outputs()[i];
             self.stat_if_necessary(o)?;
         }
 
@@ -218,12 +219,13 @@ impl<'a> DependencyScan<'a> {
         validation_nodes.extend(self.state.edge(edge).validations().iter().copied());
 
         // Visit the inputs.
-        let inputs = self.state.edge(edge).inputs().to_vec();
+        let input_count = self.state.edge(edge).inputs().len();
         let order_only = self.state.edge(edge).order_only_deps();
-        let first_order_only = inputs.len() - order_only;
+        let first_order_only = input_count - order_only;
         let mut most_recent_input: Option<NodeId> = None;
 
-        for (i, &input) in inputs.iter().enumerate() {
+        for i in 0..input_count {
+            let input = self.state.edge(edge).inputs()[i];
             self.recompute_node_dirty(input, stack, validation_nodes)?;
 
             if let Some(in_edge) = self.state.node(input).in_edge() {
@@ -254,7 +256,8 @@ impl<'a> DependencyScan<'a> {
         }
 
         if dirty {
-            for o in self.state.edge(edge).outputs().to_vec() {
+            for i in 0..self.state.edge(edge).outputs().len() {
+                let o = self.state.edge(edge).outputs()[i];
                 self.state.node_mut(o).dirty = true;
             }
         }
@@ -316,7 +319,8 @@ impl<'a> DependencyScan<'a> {
         most_recent_input: Option<NodeId>,
     ) -> Result<bool> {
         let command = self.state.edge_command_for_hash(edge);
-        for output in self.state.edge(edge).outputs().to_vec() {
+        for i in 0..self.state.edge(edge).outputs().len() {
+            let output = self.state.edge(edge).outputs()[i];
             if self.recompute_output_dirty(edge, most_recent_input, &command, output) {
                 return Ok(true);
             }
@@ -361,15 +365,17 @@ impl<'a> DependencyScan<'a> {
             return true;
         }
 
+        let explaining = self.explaining();
+
         // A `restat` rule may have "cleaned" this output in a previous run, in
         // which case the mtime recorded in the log is authoritative and the
         // file's own mtime is ignored.
-        let output_path = self.path(output);
+        let output_path: &str = self.state.node(output).path();
         let mut entry = None;
         let mut used_restat = false;
         if self.state.edge_restat(edge) {
             if let Some(log) = self.build_log {
-                if let Some(e) = log.lookup_by_output(&output_path) {
+                if let Some(e) = log.lookup_by_output(output_path) {
                     entry = Some(e);
                     used_restat = true;
                 }
@@ -381,12 +387,13 @@ impl<'a> DependencyScan<'a> {
                 let out_mtime = self.state.node(output).mtime;
                 let in_mtime = self.state.node(m).mtime;
                 if out_mtime < in_mtime {
-                    if self.explaining() {
+                    if explaining {
+                        let op = output_path.to_string();
                         let ip = self.path(m);
                         self.explain(
                             output,
                             format!(
-                                "output {output_path} older than most recent input {ip} \
+                                "output {op} older than most recent input {ip} \
                                  ({out_mtime} vs {in_mtime})"
                             ),
                         );
@@ -403,8 +410,9 @@ impl<'a> DependencyScan<'a> {
             }
             if let Some(entry) = entry {
                 if !generator && hash_command(command) != entry.command_hash {
-                    if self.explaining() {
-                        self.explain(output, format!("command line changed for {output_path}"));
+                    if explaining {
+                        let op = output_path.to_string();
+                        self.explain(output, format!("command line changed for {op}"));
                     }
                     return true;
                 }
@@ -414,13 +422,14 @@ impl<'a> DependencyScan<'a> {
                         // The recorded mtime can be older than the file's own
                         // mtime if a previous run wrote the output but failed
                         // or was interrupted.
-                        if self.explaining() {
-                            let ip = self.path(m);
+                        if explaining {
+                            let op = output_path.to_string();
                             let em = entry.mtime;
+                            let ip = self.path(m);
                             self.explain(
                                 output,
                                 format!(
-                                    "recorded mtime of {output_path} older than most recent \
+                                    "recorded mtime of {op} older than most recent \
                                      input {ip} ({em} vs {in_mtime})"
                                 ),
                             );
@@ -429,11 +438,9 @@ impl<'a> DependencyScan<'a> {
                     }
                 }
             } else if !generator {
-                if self.explaining() {
-                    self.explain(
-                        output,
-                        format!("command line not found in log for {output_path}"),
-                    );
+                if explaining {
+                    let op = output_path.to_string();
+                    self.explain(output, format!("command line not found in log for {op}"));
                 }
                 return true;
             }

@@ -34,6 +34,55 @@ pub struct ManifestParser<'a> {
     disk: &'a dyn DiskInterface,
     options: ParserOptions,
     warnings: Vec<String>,
+    /// Reused across build statements so that parsing a large manifest does
+    /// not allocate a fresh buffer per path.
+    outs: PathList,
+    ins: PathList,
+    validations: PathList,
+}
+
+/// A growable pool of [`EvalString`]s used as a scratch list of paths.
+///
+/// Entries are cleared and reused rather than dropped, which keeps their string
+/// allocations alive for the next build statement.
+#[derive(Default)]
+struct PathList {
+    items: Vec<EvalString>,
+    len: usize,
+}
+
+impl PathList {
+    fn reset(&mut self) {
+        self.len = 0;
+    }
+
+    /// Read one path into the list. Returns false when a delimiter was hit
+    /// instead (an empty path), in which case nothing was added.
+    fn read(&mut self, lexer: &mut Lexer<'_>) -> Result<bool> {
+        if self.len == self.items.len() {
+            self.items.push(EvalString::new());
+        }
+        let slot = &mut self.items[self.len];
+        slot.clear();
+        lexer.read_path(slot)?;
+        if slot.is_empty() {
+            return Ok(false);
+        }
+        self.len += 1;
+        Ok(true)
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn get(&self, i: usize) -> &EvalString {
+        &self.items[i]
+    }
 }
 
 impl<'a> ManifestParser<'a> {
@@ -48,6 +97,9 @@ impl<'a> ManifestParser<'a> {
             disk,
             options,
             warnings: Vec::new(),
+            outs: PathList::default(),
+            ins: PathList::default(),
+            validations: PathList::default(),
         }
     }
 
@@ -293,33 +345,39 @@ impl<'a> ManifestParser<'a> {
     }
 
     fn parse_edge(&mut self, lexer: &mut Lexer<'_>, scope: ScopeId) -> Result<()> {
-        let mut outs: Vec<EvalString> = Vec::new();
-        let mut ins: Vec<EvalString> = Vec::new();
-        let mut validations: Vec<EvalString> = Vec::new();
+        // Move the scratch buffers out so they can be borrowed independently of
+        // `self.state`; they go back when we are done.
+        let mut outs = std::mem::take(&mut self.outs);
+        let mut ins = std::mem::take(&mut self.ins);
+        let mut validations = std::mem::take(&mut self.validations);
+        let result = self.parse_edge_inner(lexer, scope, &mut outs, &mut ins, &mut validations);
+        self.outs = outs;
+        self.ins = ins;
+        self.validations = validations;
+        result
+    }
+
+    fn parse_edge_inner(
+        &mut self,
+        lexer: &mut Lexer<'_>,
+        scope: ScopeId,
+        outs: &mut PathList,
+        ins: &mut PathList,
+        validations: &mut PathList,
+    ) -> Result<()> {
+        outs.reset();
+        ins.reset();
+        validations.reset();
 
         // Explicit outputs.
-        loop {
-            let mut out = EvalString::new();
-            lexer.read_path(&mut out)?;
-            if out.is_empty() {
-                break;
-            }
-            outs.push(out);
-        }
+        while outs.read(lexer)? {}
 
         // Implicit outputs.
-        let mut implicit_outs = 0usize;
+        let explicit_outs = outs.len();
         if lexer.peek_token(Token::Pipe) {
-            loop {
-                let mut out = EvalString::new();
-                lexer.read_path(&mut out)?;
-                if out.is_empty() {
-                    break;
-                }
-                outs.push(out);
-                implicit_outs += 1;
-            }
+            while outs.read(lexer)? {}
         }
+        let implicit_outs = outs.len() - explicit_outs;
 
         if outs.is_empty() {
             return Err(lexer.error("expected path"));
@@ -337,53 +395,24 @@ impl<'a> ManifestParser<'a> {
         };
 
         // Explicit inputs.
-        loop {
-            let mut input = EvalString::new();
-            lexer.read_path(&mut input)?;
-            if input.is_empty() {
-                break;
-            }
-            ins.push(input);
-        }
+        while ins.read(lexer)? {}
+        let explicit_ins = ins.len();
 
         // Implicit inputs.
-        let mut implicit = 0usize;
         if lexer.peek_token(Token::Pipe) {
-            loop {
-                let mut input = EvalString::new();
-                lexer.read_path(&mut input)?;
-                if input.is_empty() {
-                    break;
-                }
-                ins.push(input);
-                implicit += 1;
-            }
+            while ins.read(lexer)? {}
         }
+        let implicit = ins.len() - explicit_ins;
 
         // Order-only inputs.
-        let mut order_only = 0usize;
         if lexer.peek_token(Token::Pipe2) {
-            loop {
-                let mut input = EvalString::new();
-                lexer.read_path(&mut input)?;
-                if input.is_empty() {
-                    break;
-                }
-                ins.push(input);
-                order_only += 1;
-            }
+            while ins.read(lexer)? {}
         }
+        let order_only = ins.len() - explicit_ins - implicit;
 
         // Validations.
         if lexer.peek_token(Token::PipeAt) {
-            loop {
-                let mut v = EvalString::new();
-                lexer.read_path(&mut v)?;
-                if v.is_empty() {
-                    break;
-                }
-                validations.push(v);
-            }
+            while validations.read(lexer)? {}
         }
 
         lexer.expect_token(Token::Newline)?;
@@ -419,10 +448,10 @@ impl<'a> ManifestParser<'a> {
             }
         }
 
-        for out in &outs {
+        for i in 0..outs.len() {
             let mut path = {
                 let mut env = ScopeEnv::new(&self.state.scopes, edge_scope);
-                out.evaluate(&mut env)
+                outs.get(i).evaluate(&mut env)
             };
             if path.is_empty() {
                 return Err(lexer.error("empty path"));
@@ -434,10 +463,10 @@ impl<'a> ManifestParser<'a> {
         }
         self.state.edge_mut(edge).implicit_outs = implicit_outs;
 
-        for input in &ins {
+        for i in 0..ins.len() {
             let mut path = {
                 let mut env = ScopeEnv::new(&self.state.scopes, edge_scope);
-                input.evaluate(&mut env)
+                ins.get(i).evaluate(&mut env)
             };
             if path.is_empty() {
                 return Err(lexer.error("empty path"));
@@ -448,10 +477,10 @@ impl<'a> ManifestParser<'a> {
         self.state.edge_mut(edge).implicit_deps = implicit;
         self.state.edge_mut(edge).order_only_deps = order_only;
 
-        for v in &validations {
+        for i in 0..validations.len() {
             let mut path = {
                 let mut env = ScopeEnv::new(&self.state.scopes, edge_scope);
-                v.evaluate(&mut env)
+                validations.get(i).evaluate(&mut env)
             };
             if path.is_empty() {
                 return Err(lexer.error("empty path"));

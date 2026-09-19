@@ -35,21 +35,15 @@ enum Tok {
 /// [`Env`].
 ///
 /// Most strings in a manifest are a single run of literal text (a path), so
-/// that case is stored inline without a vector, which matters when parsing
-/// tens of thousands of build statements.
+/// that case is held in `single` and the token vector stays empty. Clearing an
+/// `EvalString` keeps both allocations, which lets a parser reuse one buffer
+/// for every path in a manifest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EvalString {
-    inner: Inner,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-enum Inner {
-    #[default]
-    Empty,
-    /// Exactly one run of literal text.
-    Single(String),
-    /// Anything else.
-    Multi(Vec<Tok>),
+    /// Non-empty only when the string is more than one run of literal text.
+    parsed: Vec<Tok>,
+    /// The single literal run, used while `parsed` is empty.
+    single: String,
 }
 
 impl EvalString {
@@ -61,114 +55,91 @@ impl EvalString {
     /// True when no tokens have been added. Note this is *not* "evaluates to
     /// the empty string": `$undefined` is not empty.
     pub fn is_empty(&self) -> bool {
-        matches!(self.inner, Inner::Empty)
+        self.parsed.is_empty() && self.single.is_empty()
     }
 
-    /// Forget all tokens.
+    /// Forget all tokens, keeping the allocations for reuse.
     pub fn clear(&mut self) {
-        // Keep the allocation around: parsers reuse these.
-        match &mut self.inner {
-            Inner::Empty => {}
-            Inner::Single(s) => {
-                s.clear();
-                self.inner = Inner::Empty;
-            }
-            Inner::Multi(v) => {
-                v.clear();
-                self.inner = Inner::Empty;
-            }
-        }
+        self.parsed.clear();
+        self.single.clear();
     }
 
     /// Append literal text, coalescing with a preceding literal.
     pub fn add_text(&mut self, text: &str) {
-        match &mut self.inner {
-            Inner::Empty => self.inner = Inner::Single(text.to_string()),
-            Inner::Single(s) => s.push_str(text),
-            Inner::Multi(v) => match v.last_mut() {
-                Some(Tok::Text(t)) => t.push_str(text),
-                _ => v.push(Tok::Text(text.to_string())),
-            },
+        if self.parsed.is_empty() {
+            self.single.push_str(text);
+        } else if let Some(Tok::Text(t)) = self.parsed.last_mut() {
+            t.push_str(text);
+        } else {
+            self.parsed.push(Tok::Text(text.to_string()));
         }
     }
 
     /// Append a variable reference.
     pub fn add_var(&mut self, name: &str) {
-        match &mut self.inner {
-            Inner::Empty => self.inner = Inner::Multi(vec![Tok::Var(name.to_string())]),
-            Inner::Single(_) => {
-                let Inner::Single(text) = std::mem::replace(&mut self.inner, Inner::Empty) else {
-                    unreachable!()
-                };
-                self.inner = Inner::Multi(vec![Tok::Text(text), Tok::Var(name.to_string())]);
-            }
-            Inner::Multi(v) => v.push(Tok::Var(name.to_string())),
+        if self.parsed.is_empty() && !self.single.is_empty() {
+            // Going from one token to two: the literal moves into the vector.
+            let text = std::mem::take(&mut self.single);
+            self.parsed.push(Tok::Text(text));
         }
+        self.parsed.push(Tok::Var(name.to_string()));
     }
 
     /// Expand all variables using `env`.
     pub fn evaluate(&self, env: &mut dyn Env) -> String {
-        match &self.inner {
-            Inner::Empty => String::new(),
-            Inner::Single(t) => t.clone(),
-            Inner::Multi(toks) => {
-                let mut out = String::new();
-                for t in toks {
-                    match t {
-                        Tok::Text(t) => out.push_str(t),
-                        Tok::Var(v) => out.push_str(&env.lookup(v)),
-                    }
-                }
-                out
+        if self.parsed.is_empty() {
+            return self.single.clone();
+        }
+        let mut out = String::new();
+        for t in &self.parsed {
+            match t {
+                Tok::Text(t) => out.push_str(t),
+                Tok::Var(v) => out.push_str(&env.lookup(v)),
             }
         }
+        out
     }
 
     /// Render back to source form, with variables as `${name}`.
     pub fn unparse(&self) -> String {
-        match &self.inner {
-            Inner::Empty => String::new(),
-            Inner::Single(t) => t.clone(),
-            Inner::Multi(toks) => {
-                let mut out = String::new();
-                for t in toks {
-                    match t {
-                        Tok::Text(t) => out.push_str(t),
-                        Tok::Var(v) => {
-                            out.push_str("${");
-                            out.push_str(v);
-                            out.push('}');
-                        }
-                    }
+        if self.parsed.is_empty() {
+            return self.single.clone();
+        }
+        let mut out = String::new();
+        for t in &self.parsed {
+            match t {
+                Tok::Text(t) => out.push_str(t),
+                Tok::Var(v) => {
+                    out.push_str("${");
+                    out.push_str(v);
+                    out.push('}');
                 }
-                out
             }
         }
+        out
     }
 
     /// Debug representation used by tests: `[text][$var]`.
     pub fn serialize(&self) -> String {
         let mut out = String::new();
-        match &self.inner {
-            Inner::Empty => {}
-            Inner::Single(t) => {
+        if self.parsed.is_empty() {
+            if !self.single.is_empty() {
                 out.push('[');
-                out.push_str(t);
+                out.push_str(&self.single);
                 out.push(']');
             }
-            Inner::Multi(toks) => {
-                for t in toks {
-                    out.push('[');
-                    match t {
-                        Tok::Text(t) => out.push_str(t),
-                        Tok::Var(v) => {
-                            out.push('$');
-                            out.push_str(v);
-                        }
-                    }
-                    out.push(']');
+            return out;
+        }
+        for t in &self.parsed {
+            out.push('[');
+            match t {
+                Tok::Text(t) => out.push_str(t),
+                Tok::Var(v) => {
+                    out.push('$');
+                    out.push_str(v);
                 }
             }
+            out.push(']');
         }
         out
     }

@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -130,19 +130,35 @@ impl CommandRunner for DryRunCommandRunner {
 pub type CommandLauncher = dyn Fn(&str) -> Command + Send + Sync;
 
 /// Runs commands as real subprocesses.
+///
+/// Commands are executed on a small pool of worker threads that is grown
+/// lazily up to the parallelism limit and then reused, so starting a command
+/// costs a channel send rather than a thread spawn. Each worker reads its
+/// child's merged stdout/stderr to EOF, waits for it, and reports the result.
 pub struct RealCommandRunner {
     parallelism: usize,
     max_load_average: f64,
     /// Commands started but not yet reaped by [`CommandRunner::wait_for_command`].
     outstanding: usize,
-    tx: Sender<CommandResult>,
-    rx: Receiver<CommandResult>,
-    jobs: Arc<Mutex<Vec<Job>>>,
+    job_tx: Option<Sender<Job>>,
+    job_rx: Arc<Mutex<Receiver<Job>>>,
+    result_tx: Sender<CommandResult>,
+    result_rx: Receiver<CommandResult>,
+    /// Workers currently waiting for a job.
+    idle: Arc<AtomicUsize>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+    running: Arc<Mutex<Vec<RunningJob>>>,
     interrupt: Arc<AtomicBool>,
     launcher: Arc<CommandLauncher>,
 }
 
 struct Job {
+    edge: EdgeId,
+    command: String,
+    use_console: bool,
+}
+
+struct RunningJob {
     edge: EdgeId,
     child: Arc<Mutex<Option<Child>>>,
 }
@@ -150,14 +166,19 @@ struct Job {
 impl RealCommandRunner {
     /// A runner that starts at most `parallelism` commands at a time.
     pub fn new(parallelism: usize) -> RealCommandRunner {
-        let (tx, rx) = channel();
+        let (job_tx, job_rx) = channel();
+        let (result_tx, result_rx) = channel();
         RealCommandRunner {
             parallelism: parallelism.max(1),
             max_load_average: -1.0,
             outstanding: 0,
-            tx,
-            rx,
-            jobs: Arc::new(Mutex::new(Vec::new())),
+            job_tx: Some(job_tx),
+            job_rx: Arc::new(Mutex::new(job_rx)),
+            result_tx,
+            result_rx,
+            idle: Arc::new(AtomicUsize::new(0)),
+            workers: Vec::new(),
+            running: Arc::new(Mutex::new(Vec::new())),
             interrupt: Arc::new(AtomicBool::new(false)),
             launcher: Arc::new(default_launcher),
         }
@@ -182,6 +203,80 @@ impl RealCommandRunner {
 
     fn interrupted(&self) -> bool {
         self.interrupt.load(Ordering::SeqCst)
+    }
+
+    fn spawn_worker(&mut self) -> Result<()> {
+        let job_rx = Arc::clone(&self.job_rx);
+        let result_tx = self.result_tx.clone();
+        let idle = Arc::clone(&self.idle);
+        let running = Arc::clone(&self.running);
+        let launcher = Arc::clone(&self.launcher);
+        let name = format!("shuriken-worker-{}", self.workers.len());
+
+        let handle = std::thread::Builder::new()
+            .name(name)
+            .spawn(move || {
+                loop {
+                    // Only one worker waits on the queue at a time; the rest
+                    // queue up on the mutex. Handing a job over is cheap
+                    // compared with running it.
+                    idle.fetch_add(1, Ordering::SeqCst);
+                    let job = {
+                        let rx = job_rx.lock().unwrap_or_else(|e| e.into_inner());
+                        rx.recv()
+                    };
+                    idle.fetch_sub(1, Ordering::SeqCst);
+                    let Ok(job) = job else {
+                        return; // The runner went away.
+                    };
+
+                    let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+                    running
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(RunningJob {
+                            edge: job.edge,
+                            child: Arc::clone(&child_slot),
+                        });
+
+                    let outcome = run_one(&*launcher, &job.command, job.use_console, &child_slot);
+                    let (status, output) = match outcome {
+                        Ok(v) => v,
+                        Err(e) => (ExitStatus::FAILURE, format!("{e}\n")),
+                    };
+                    *child_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    {
+                        let mut running = running.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(pos) = running.iter().position(|j| j.edge == job.edge) {
+                            running.remove(pos);
+                        }
+                    }
+
+                    if result_tx
+                        .send(CommandResult {
+                            edge: job.edge,
+                            status,
+                            output,
+                        })
+                        .is_err()
+                    {
+                        return; // Nobody is listening any more.
+                    }
+                }
+            })
+            .map_err(|e| crate::error::Error::io("spawning build thread", e))?;
+        self.workers.push(handle);
+        Ok(())
+    }
+}
+
+impl Drop for RealCommandRunner {
+    fn drop(&mut self) {
+        // Closing the queue makes idle workers exit; busy ones finish first.
+        self.job_tx = None;
+        for handle in std::mem::take(&mut self.workers) {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -213,51 +308,25 @@ impl CommandRunner for RealCommandRunner {
             .edge_command_checked(edge)
             .map_err(crate::error::Error::build)?;
         let use_console = state.edge_use_console(edge);
-        let tx = self.tx.clone();
-        let jobs = Arc::clone(&self.jobs);
-        let launcher = Arc::clone(&self.launcher);
 
-        let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
-        jobs.lock().unwrap_or_else(|e| e.into_inner()).push(Job {
-            edge,
-            child: Arc::clone(&child_slot),
-        });
-
-        let builder = std::thread::Builder::new().name(format!("shuriken-edge-{}", edge.0));
-        let spawn_result = builder.spawn(move || {
-            let result = run_one(&*launcher, &command, use_console, &child_slot);
-            let (status, output) = match result {
-                Ok(v) => v,
-                Err(e) => (ExitStatus::FAILURE, format!("{e}\n")),
-            };
-            // Drop our handle on the child before reporting completion.
-            *child_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            {
-                let mut jobs = jobs.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(pos) = jobs.iter().position(|j| j.edge == edge) {
-                    jobs.remove(pos);
-                }
-            }
-            let _ = tx.send(CommandResult {
-                edge,
-                status,
-                output,
-            });
-        });
-
-        match spawn_result {
-            Ok(_handle) => {
-                self.outstanding += 1;
-                Ok(())
-            }
-            Err(e) => {
-                let mut jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(pos) = jobs.iter().position(|j| j.edge == edge) {
-                    jobs.remove(pos);
-                }
-                Err(crate::error::Error::io("spawning build thread", e))
-            }
+        // Grow the pool only when every worker is busy.
+        if self.idle.load(Ordering::SeqCst) == 0 && self.workers.len() < self.parallelism {
+            self.spawn_worker()?;
         }
+
+        let job = Job {
+            edge,
+            command,
+            use_console,
+        };
+        match self.job_tx.as_ref() {
+            Some(tx) => tx
+                .send(job)
+                .map_err(|_| crate::error::Error::build("build worker pool has shut down"))?,
+            None => return Err(crate::error::Error::build("build worker pool has shut down")),
+        }
+        self.outstanding += 1;
+        Ok(())
     }
 
     fn wait_for_command(&mut self) -> Option<CommandResult> {
@@ -265,7 +334,7 @@ impl CommandRunner for RealCommandRunner {
             if self.interrupted() {
                 return None;
             }
-            match self.rx.recv_timeout(Duration::from_millis(50)) {
+            match self.result_rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(result) => {
                     self.outstanding -= 1;
                     return Some(result);
@@ -277,7 +346,7 @@ impl CommandRunner for RealCommandRunner {
     }
 
     fn active_edges(&self) -> Vec<EdgeId> {
-        self.jobs
+        self.running
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
@@ -288,21 +357,22 @@ impl CommandRunner for RealCommandRunner {
     fn abort(&mut self) {
         // Kill whatever is still running. A child whose lock we cannot take is
         // already being reaped, so it will exit on its own.
-        let jobs = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
-        for job in jobs.iter() {
-            if let Ok(mut slot) = job.child.try_lock() {
-                if let Some(child) = slot.as_mut() {
-                    let _ = child.kill();
+        {
+            let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+            for job in running.iter() {
+                if let Ok(mut slot) = job.child.try_lock() {
+                    if let Some(child) = slot.as_mut() {
+                        let _ = child.kill();
+                    }
                 }
             }
         }
-        drop(jobs);
 
-        // Drain anything that finishes promptly so threads are not left
-        // blocked on the channel.
+        // Drain anything that finishes promptly so workers are not left
+        // blocked trying to report results.
         let deadline = std::time::Instant::now() + Duration::from_millis(500);
         while self.outstanding > 0 && std::time::Instant::now() < deadline {
-            match self.rx.try_recv() {
+            match self.result_rx.try_recv() {
                 Ok(_) => self.outstanding -= 1,
                 Err(TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(10)),
                 Err(TryRecvError::Disconnected) => break,

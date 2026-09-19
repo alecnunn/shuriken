@@ -156,7 +156,15 @@ impl std::hash::Hasher for FxHasher {
 
     #[inline]
     fn finish(&self) -> u64 {
-        self.hash
+        // Finalize before handing the value to a hash map. Without this, the
+        // low bits (which hashbrown uses to pick a bucket) carry very little
+        // entropy for keys that share a prefix, such as the thousands of
+        // similar paths in a large manifest, and probe chains explode.
+        let mut h = self.hash;
+        h ^= h >> 32;
+        h = h.wrapping_mul(0xd6e8_feb8_6659_fd93);
+        h ^= h >> 32;
+        h
     }
 }
 
@@ -186,6 +194,24 @@ mod tests {
         // Captured from ninja 1.13.2's .ninja_log for this exact command.
         let cmd = r#"cp a.txt b.txt && printf "b.txt: a.txt extra.h\n" > b.txt.d"#;
         assert_eq!(format!("{:016x}", hash_command(cmd)), "c5838a4b554d43e9");
+    }
+
+    #[test]
+    fn fx_hasher_spreads_similar_keys() {
+        use std::hash::{BuildHasher, Hash, Hasher};
+        // Keys that differ only in a suffix must land in different buckets:
+        // this is what a manifest full of "out1234"-style paths looks like.
+        let build = FxBuildHasher;
+        let mut low_bits = std::collections::HashSet::new();
+        for i in 0..4096u32 {
+            let key = format!("out{i}");
+            let mut h = build.build_hasher();
+            key.hash(&mut h);
+            low_bits.insert(h.finish() & 0xfff);
+        }
+        // A perfect spread would be 4096 distinct values; random hashing gives
+        // about 63% of that. Anything much below signals a degenerate hasher.
+        assert!(low_bits.len() > 2200, "only {} distinct buckets", low_bits.len());
     }
 
     #[test]
