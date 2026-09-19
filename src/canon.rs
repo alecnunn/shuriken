@@ -63,7 +63,10 @@ pub fn canonicalize_bytes(v: &mut Vec<u8>) -> u64 {
     } else {
         dst_start = 0;
         // Leading "../" sequences are common and can never be simplified.
-        while src + 3 <= end && v[src] == b'.' && v[src + 1] == b'.' && is_path_separator(v[src + 2])
+        while src + 3 <= end
+            && v[src] == b'.'
+            && v[src + 1] == b'.'
+            && is_path_separator(v[src + 2])
         {
             src += 3;
             dst += 3;

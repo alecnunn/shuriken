@@ -323,7 +323,11 @@ impl CommandRunner for RealCommandRunner {
             Some(tx) => tx
                 .send(job)
                 .map_err(|_| crate::error::Error::build("build worker pool has shut down"))?,
-            None => return Err(crate::error::Error::build("build worker pool has shut down")),
+            None => {
+                return Err(crate::error::Error::build(
+                    "build worker pool has shut down",
+                ));
+            }
         }
         self.outstanding += 1;
         Ok(())
@@ -422,7 +426,12 @@ fn run_one(
         let mut slot = child_slot.lock().unwrap_or_else(|e| e.into_inner());
         match slot.as_mut() {
             Some(child) => child.wait()?,
-            None => return Ok((ExitStatus::FAILURE, String::from_utf8_lossy(&buf).into_owned())),
+            None => {
+                return Ok((
+                    ExitStatus::FAILURE,
+                    String::from_utf8_lossy(&buf).into_owned(),
+                ));
+            }
         }
     };
 

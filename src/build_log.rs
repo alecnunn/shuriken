@@ -138,7 +138,9 @@ impl BuildLog {
     pub fn load(&mut self, path: &str) -> Result<LoadResult> {
         let contents = match fs::read(path) {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(LoadResult::not_found()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(LoadResult::not_found());
+            }
             Err(e) => return Err(Error::io(path.to_string(), e)),
         };
 
@@ -194,7 +196,11 @@ impl BuildLog {
                 mtime: mtime.trim().parse().unwrap_or(0),
             };
             total_entry_count += 1;
-            if self.entries.insert(Arc::clone(&entry.output), entry).is_none() {
+            if self
+                .entries
+                .insert(Arc::clone(&entry.output), entry)
+                .is_none()
+            {
                 unique_entry_count += 1;
             }
         }
@@ -250,7 +256,7 @@ impl BuildLog {
             .map_err(|e| Error::io(path.clone(), e))?
             .len();
         if len == 0 {
-            write!(file, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}\n")
+            writeln!(file, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}")
                 .map_err(|e| Error::io(path.clone(), e))?;
         }
         self.file = Some(file);
@@ -296,7 +302,8 @@ impl BuildLog {
             if let Some(file) = self.file.as_mut() {
                 file.write_all(line.as_bytes())
                     .map_err(|e| Error::io("writing build log", e))?;
-                file.flush().map_err(|e| Error::io("writing build log", e))?;
+                file.flush()
+                    .map_err(|e| Error::io("writing build log", e))?;
             }
         }
         Ok(())
@@ -330,7 +337,7 @@ impl BuildLog {
         {
             let mut f =
                 fs::File::create(&temp_path).map_err(|e| Error::io(temp_path.clone(), e))?;
-            write!(f, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}\n")
+            writeln!(f, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}")
                 .map_err(|e| Error::io(temp_path.clone(), e))?;
 
             let mut dead: Vec<Arc<str>> = Vec::new();
@@ -369,7 +376,7 @@ impl BuildLog {
         {
             let mut f =
                 fs::File::create(&temp_path).map_err(|e| Error::io(temp_path.clone(), e))?;
-            write!(f, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}\n")
+            writeln!(f, "{FILE_SIGNATURE_PREFIX}{CURRENT_VERSION}")
                 .map_err(|e| Error::io(temp_path.clone(), e))?;
 
             let mut keys: Vec<Arc<str>> = self.entries.keys().cloned().collect();

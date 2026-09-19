@@ -198,20 +198,22 @@ mod tests {
 
     #[test]
     fn fx_hasher_spreads_similar_keys() {
-        use std::hash::{BuildHasher, Hash, Hasher};
+        use std::hash::BuildHasher;
         // Keys that differ only in a suffix must land in different buckets:
         // this is what a manifest full of "out1234"-style paths looks like.
         let build = FxBuildHasher;
         let mut low_bits = std::collections::HashSet::new();
         for i in 0..4096u32 {
             let key = format!("out{i}");
-            let mut h = build.build_hasher();
-            key.hash(&mut h);
-            low_bits.insert(h.finish() & 0xfff);
+            low_bits.insert(build.hash_one(&key) & 0xfff);
         }
         // A perfect spread would be 4096 distinct values; random hashing gives
         // about 63% of that. Anything much below signals a degenerate hasher.
-        assert!(low_bits.len() > 2200, "only {} distinct buckets", low_bits.len());
+        assert!(
+            low_bits.len() > 2200,
+            "only {} distinct buckets",
+            low_bits.len()
+        );
     }
 
     #[test]

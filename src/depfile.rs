@@ -90,7 +90,10 @@ pub fn parse_depfile(content: &[u8]) -> Result<Depfile, String> {
                     }
                     Some(b':') => {
                         let follow = content.get(i + k + 1).copied();
-                        let ws = matches!(follow, Some(0) | Some(b' ') | Some(b'\r') | Some(b'\n') | Some(b'\t'));
+                        let ws = matches!(
+                            follow,
+                            Some(0) | Some(b' ') | Some(b'\r') | Some(b'\n') | Some(b'\t')
+                        );
                         if ws {
                             // Backslashes, a colon and then whitespace: normal
                             // text, and the filename ends here.
@@ -183,7 +186,7 @@ pub fn parse_depfile(content: &[u8]) -> Result<Depfile, String> {
 
         if !buf.is_empty() {
             is_empty = false;
-            if ins.iter().any(|x| *x == buf) {
+            if ins.contains(&buf) {
                 if !is_dependency {
                     // We passed an input on the left side; reject new inputs.
                     poisoned_input = true;
@@ -193,7 +196,7 @@ pub fn parse_depfile(content: &[u8]) -> Result<Depfile, String> {
                     return Err("inputs may not also have inputs".to_string());
                 }
                 ins.push(buf);
-            } else if !outs.iter().any(|x| *x == buf) {
+            } else if !outs.contains(&buf) {
                 outs.push(buf);
             }
         }

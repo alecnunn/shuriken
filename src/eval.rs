@@ -206,10 +206,7 @@ impl Rule {
 
     /// The unexpanded value bound to `key`, if any.
     pub fn binding(&self, key: &str) -> Option<&EvalString> {
-        self.bindings
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v)
+        self.bindings.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
     /// All bindings, in declaration order.

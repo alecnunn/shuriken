@@ -274,7 +274,10 @@ impl<'a> ManifestParser<'a> {
             }
         }
 
-        let has_rspfile = rule.binding("rspfile").map(|e| !e.is_empty()).unwrap_or(false);
+        let has_rspfile = rule
+            .binding("rspfile")
+            .map(|e| !e.is_empty())
+            .unwrap_or(false);
         let has_rspfile_content = rule
             .binding("rspfile_content")
             .map(|e| !e.is_empty())
@@ -283,7 +286,11 @@ impl<'a> ManifestParser<'a> {
             return Err(lexer.error("rspfile and rspfile_content need to be both specified"));
         }
 
-        if !rule.binding("command").map(|e| !e.is_empty()).unwrap_or(false) {
+        if !rule
+            .binding("command")
+            .map(|e| !e.is_empty())
+            .unwrap_or(false)
+        {
             return Err(lexer.error("expected 'command =' line"));
         }
 
@@ -567,10 +574,7 @@ mod tests {
 
     #[test]
     fn simple_rule_and_edge() {
-        let s = parse(
-            "rule cat\n  command = cat $in > $out\n\nbuild out: cat in1 in2\n",
-        )
-        .unwrap();
+        let s = parse("rule cat\n  command = cat $in > $out\n\nbuild out: cat in1 in2\n").unwrap();
         assert_eq!(s.edges().len(), 1);
         let e = crate::state::EdgeId(0);
         assert_eq!(s.edge_command(e), "cat in1 in2 > out");
@@ -645,10 +649,8 @@ mod tests {
 
     #[test]
     fn shell_escaping_in_command() {
-        let s = parse(
-            "rule cat\n  command = cat $in > $out\n\nbuild out put: cat in$ put\n",
-        )
-        .unwrap();
+        let s =
+            parse("rule cat\n  command = cat $in > $out\n\nbuild out put: cat in$ put\n").unwrap();
         assert_eq!(
             s.edge_command(crate::state::EdgeId(0)),
             "cat 'in put' > out put"
@@ -685,7 +687,10 @@ mod tests {
             ("build\n", "expected path"),
             ("build x: nope\n", "unknown build rule 'nope'"),
             ("rule r\n", "expected 'command =' line"),
-            ("rule r\n  command = x\n  bogus = y\n", "unexpected variable 'bogus'"),
+            (
+                "rule r\n  command = x\n  bogus = y\n",
+                "unexpected variable 'bogus'",
+            ),
             ("pool p\n", "expected 'depth =' line"),
             ("pool p\n  depth = -1\n", "invalid pool depth"),
             ("default nonexistent\n", "unknown target 'nonexistent'"),
@@ -714,10 +719,8 @@ mod tests {
 
     #[test]
     fn multiple_rules_generate() {
-        let e = parse(
-            "rule cat\n  command = cat $in > $out\n\nbuild a: cat i\nbuild a: cat j\n",
-        )
-        .unwrap_err();
+        let e = parse("rule cat\n  command = cat $in > $out\n\nbuild a: cat i\nbuild a: cat j\n")
+            .unwrap_err();
         assert!(e.to_string().contains("multiple rules generate a"), "{e}");
     }
 
@@ -781,16 +784,10 @@ mod tests {
 
     #[test]
     fn dyndep_must_be_an_input() {
-        let e = parse(
-            "rule r\n  command = x\n  dyndep = dd\n\nbuild out: r in\n",
-        )
-        .unwrap_err();
+        let e = parse("rule r\n  command = x\n  dyndep = dd\n\nbuild out: r in\n").unwrap_err();
         assert!(e.to_string().contains("dyndep 'dd' is not an input"), "{e}");
 
-        let s = parse(
-            "rule r\n  command = x\n  dyndep = dd\n\nbuild out: r in | dd\n",
-        )
-        .unwrap();
+        let s = parse("rule r\n  command = x\n  dyndep = dd\n\nbuild out: r in | dd\n").unwrap();
         let e = s.edge(crate::state::EdgeId(0));
         assert!(e.dyndep().is_some());
         assert!(s.node(e.dyndep().unwrap()).dyndep_pending);

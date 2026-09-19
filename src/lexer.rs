@@ -350,9 +350,7 @@ impl<'a> Lexer<'a> {
                 b'$' => {
                     if p + 1 >= len {
                         self.last_token = Some(s);
-                        return Err(
-                            self.error("bad $-escape (literal $ must be written as $$)")
-                        );
+                        return Err(self.error("bad $-escape (literal $ must be written as $$)"));
                     }
                     match input[p + 1] {
                         b'$' => {
@@ -613,7 +611,10 @@ mod tests {
     fn tabs_are_rejected() {
         let mut lexer = Lexer::new("input", b"\tfoo");
         assert_eq!(lexer.read_token(), Token::Error);
-        assert_eq!(lexer.describe_last_error(), "tabs are not allowed, use spaces");
+        assert_eq!(
+            lexer.describe_last_error(),
+            "tabs are not allowed, use spaces"
+        );
     }
 
     fn read_value(input: &str) -> Result<String> {

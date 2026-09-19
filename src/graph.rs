@@ -154,11 +154,9 @@ impl<'a> DependencyScan<'a> {
                 return Ok(());
             }
             self.stat_if_necessary(node)?;
-            if !self.state.node(node).exists() {
-                if self.explaining() {
-                    let p = self.path(node);
-                    self.explain(node, format!("{p} has no in-edge and is missing"));
-                }
+            if !self.state.node(node).exists() && self.explaining() {
+                let p = self.path(node);
+                self.explain(node, format!("{p} has no in-edge and is missing"));
             }
             let exists = self.state.node(node).exists();
             self.state.node_mut(node).dirty = !exists;
@@ -244,9 +242,9 @@ impl<'a> DependencyScan<'a> {
                     self.explain(node, format!("{p} is dirty"));
                 }
                 dirty = true;
-            } else if most_recent_input.is_none_or(|m| {
-                self.state.node(input).mtime > self.state.node(m).mtime
-            }) {
+            } else if most_recent_input
+                .is_none_or(|m| self.state.node(input).mtime > self.state.node(m).mtime)
+            {
                 most_recent_input = Some(input);
             }
         }
@@ -406,7 +404,7 @@ impl<'a> DependencyScan<'a> {
         if let Some(log) = self.build_log {
             let generator = self.state.edge_is_generator(edge);
             if entry.is_none() {
-                entry = log.lookup_by_output(&output_path);
+                entry = log.lookup_by_output(output_path);
             }
             if let Some(entry) = entry {
                 if !generator && hash_command(command) != entry.command_hash {

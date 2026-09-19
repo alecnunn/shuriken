@@ -11,7 +11,9 @@ use crate::depfile::parse_depfile;
 use crate::deps_log::DepsLog;
 use crate::disk::DiskInterface;
 use crate::error::{Error, Result};
-use crate::exec::{CommandResult, CommandRunner, DryRunCommandRunner, ExitStatus, RealCommandRunner};
+use crate::exec::{
+    CommandResult, CommandRunner, DryRunCommandRunner, ExitStatus, RealCommandRunner,
+};
 use crate::graph::{DependencyScan, Explanations};
 use crate::msvc;
 use crate::plan::{EdgeResult, Plan};
@@ -240,7 +242,9 @@ impl<'a> Builder<'a> {
             if failures_allowed > 0 {
                 let mut capacity = self.runner().can_run_more();
                 while capacity > 0 {
-                    let Some(edge) = self.plan.find_work() else { break };
+                    let Some(edge) = self.plan.find_work() else {
+                        break;
+                    };
 
                     // A generator may rewrite (or delete) the build log, so
                     // close our handle on it first.
@@ -399,7 +403,10 @@ impl<'a> Builder<'a> {
             .expect("command runner")
             .start_command(state, edge)
             .map_err(|e| {
-                Error::build(format!("command '{}' failed: {e}", state.edge_command(edge)))
+                Error::build(format!(
+                    "command '{}' failed: {e}",
+                    state.edge_command(edge)
+                ))
             })
     }
 
@@ -476,8 +483,7 @@ impl<'a> Builder<'a> {
                             self.deps_log.as_deref(),
                             self.explanations.as_mut(),
                         );
-                        self.plan
-                            .clean_node(&mut scan, output, &mut *self.status)?;
+                        self.plan.clean_node(&mut scan, output, &mut *self.status)?;
                         node_cleaned = true;
                     }
                 }
@@ -578,15 +584,17 @@ impl<'a> Builder<'a> {
             "gcc" => {
                 let depfile = self.state.edge_depfile(result.edge);
                 if depfile.is_empty() {
-                    return Err(Error::build("edge with deps=gcc but no depfile makes no sense"));
+                    return Err(Error::build(
+                        "edge with deps=gcc but no depfile makes no sense",
+                    ));
                 }
                 // A missing depfile is treated as empty.
                 let content = self.disk.read_file(&depfile)?.unwrap_or_default();
                 if content.is_empty() {
                     return Ok(Vec::new());
                 }
-                let deps = parse_depfile(&content)
-                    .map_err(|e| Error::build(format!("{depfile}: {e}")))?;
+                let deps =
+                    parse_depfile(&content).map_err(|e| Error::build(format!("{depfile}: {e}")))?;
                 let mut nodes = Vec::with_capacity(deps.ins.len());
                 for input in deps.ins {
                     let mut path = input;

@@ -11,7 +11,7 @@ use crate::clean::{CleanReport, Cleaner};
 use crate::deps_log::DepsLog;
 use crate::disk::{DiskInterface, RealDiskInterface};
 use crate::error::{Error, Result};
-use crate::exec::ExitStatus;
+use crate::exec::{CommandRunner, ExitStatus};
 use crate::parse::{ManifestParser, ParserOptions};
 use crate::state::{NodeId, State};
 use crate::status::{NullStatus, Status};
@@ -33,7 +33,15 @@ pub struct EngineOptions {
     pub interrupt: Option<Arc<AtomicBool>>,
     /// The filesystem to use; defaults to the real one.
     pub disk: Option<Box<dyn DiskInterface>>,
+    /// How to execute commands; defaults to local subprocesses.
+    ///
+    /// This is the hook for running commands somewhere else (a sandbox, a
+    /// container, a remote worker) or for recording them instead.
+    pub command_runner: Option<Arc<CommandRunnerFactory>>,
 }
+
+/// Builds a [`CommandRunner`] for a build, given its configuration.
+pub type CommandRunnerFactory = dyn Fn(&BuildConfig) -> Box<dyn CommandRunner + Send> + Send + Sync;
 
 impl Default for EngineOptions {
     fn default() -> Self {
@@ -43,6 +51,7 @@ impl Default for EngineOptions {
             rebuild_manifest: true,
             interrupt: None,
             disk: None,
+            command_runner: None,
         }
     }
 }
@@ -380,8 +389,10 @@ impl Engine {
         let target_nodes = self.resolve_targets(targets)?;
 
         let config = self.options.build.clone();
+        let builder_config = config.clone();
         let start_time_millis = now_millis();
         let interrupt = self.options.interrupt.clone();
+        let runner_factory = self.options.command_runner.clone();
 
         let mut builder = Builder::new(
             &mut self.state,
@@ -394,6 +405,9 @@ impl Engine {
         );
         if let Some(flag) = interrupt {
             builder.set_interrupt_flag(flag);
+        }
+        if let Some(factory) = &runner_factory {
+            builder.set_command_runner(factory(&builder_config));
         }
 
         let scan_start = Instant::now();
@@ -445,8 +459,10 @@ impl Engine {
         };
 
         let config = self.options.build.clone();
+        let builder_config = config.clone();
         let start_time_millis = now_millis();
         let interrupt = self.options.interrupt.clone();
+        let runner_factory = self.options.command_runner.clone();
 
         let outcome = {
             let mut builder = Builder::new(
@@ -460,6 +476,9 @@ impl Engine {
             );
             if let Some(flag) = interrupt {
                 builder.set_interrupt_flag(flag);
+            }
+            if let Some(factory) = &runner_factory {
+                builder.set_command_runner(factory(&builder_config));
             }
             builder.add_target(node).map_err(Error::into_graph)?;
             if builder.already_up_to_date() {
@@ -518,7 +537,9 @@ impl Engine {
                 let path = self.state.node(output).path().to_string();
                 if let Some(entry) = self.build_log.lookup_by_output(&path) {
                     let duration = entry.duration_millis();
-                    self.state.edge_mut(edge).set_prev_elapsed_time_millis(duration);
+                    self.state
+                        .edge_mut(edge)
+                        .set_prev_elapsed_time_millis(duration);
                     break;
                 }
             }
@@ -678,7 +699,7 @@ mod tests {
 
         let first = {
             let mut engine = Engine::load(tmp.path("build.ninja"), opts()).unwrap();
-            engine.build(&[target.clone()]).unwrap()
+            engine.build(std::slice::from_ref(&target)).unwrap()
         };
         let second = {
             let mut engine = Engine::load(tmp.path("build.ninja"), opts()).unwrap();

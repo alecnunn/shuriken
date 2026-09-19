@@ -398,7 +398,8 @@ impl ConsoleStatus {
                     out.push_str(&format_rate(rate));
                 }
                 'c' => {
-                    self.current_rate.update(self.finished_edges, self.time_millis);
+                    self.current_rate
+                        .update(self.finished_edges, self.time_millis);
                     out.push_str(&format_rate(self.current_rate.rate));
                 }
                 'p' => {

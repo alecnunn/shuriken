@@ -223,11 +223,7 @@ fn parse_args(args: &[String]) -> Parsed {
                         let v = value.unwrap();
                         match v.parse::<i64>() {
                             Ok(n) if n >= 0 => {
-                                config.parallelism = if n == 0 {
-                                    usize::MAX
-                                } else {
-                                    n as usize
-                                };
+                                config.parallelism = if n == 0 { usize::MAX } else { n as usize };
                                 parallelism_explicit = true;
                             }
                             _ => {
@@ -240,11 +236,8 @@ fn parse_args(args: &[String]) -> Parsed {
                         let v = value.unwrap();
                         match v.parse::<i64>() {
                             Ok(n) => {
-                                config.failures_allowed = if n > 0 {
-                                    n as usize
-                                } else {
-                                    usize::MAX
-                                };
+                                config.failures_allowed =
+                                    if n > 0 { n as usize } else { usize::MAX };
                             }
                             Err(_) => {
                                 fatal("-k parameter not numeric; did you mean -k 0?");
@@ -272,9 +265,9 @@ fn parse_args(args: &[String]) -> Parsed {
                         if !is_known_tool(&name) {
                             let names = tool_names();
                             match shuriken::util::spellcheck(&name, &names) {
-                                Some(s) => fatal(&format!(
-                                    "unknown tool '{name}', did you mean '{s}'?"
-                                )),
+                                Some(s) => {
+                                    fatal(&format!("unknown tool '{name}', did you mean '{s}'?"))
+                                }
                                 None => fatal(&format!("unknown tool '{name}'")),
                             }
                             return Parsed::Exit(1);
@@ -391,8 +384,14 @@ fn warning_enable(name: &str, options: &mut Options) -> std::result::Result<bool
 /// Tools that need the manifest but not the logs.
 const TOOLS: &[(&str, &str)] = &[
     ("clean", "clean built files"),
-    ("cleandead", "clean built files that are no longer produced by the manifest"),
-    ("commands", "list all commands required to rebuild given targets"),
+    (
+        "cleandead",
+        "clean built files that are no longer produced by the manifest",
+    ),
+    (
+        "commands",
+        "list all commands required to rebuild given targets",
+    ),
     ("compdb", "dump JSON compilation database to stdout"),
     (
         "compdb-targets",
@@ -400,8 +399,14 @@ const TOOLS: &[(&str, &str)] = &[
     ),
     ("deps", "show dependencies stored in the deps log"),
     ("graph", "output graphviz dot file for targets"),
-    ("inputs", "list all inputs required to rebuild given targets"),
-    ("missingdeps", "check deps log dependencies on generated files"),
+    (
+        "inputs",
+        "list all inputs required to rebuild given targets",
+    ),
+    (
+        "missingdeps",
+        "check deps log dependencies on generated files",
+    ),
     (
         "multi-inputs",
         "print one or more sets of inputs required to build targets",
@@ -449,6 +454,7 @@ fn run(options: Options, config: BuildConfig) -> Result<i32> {
         rebuild_manifest: options.tool.is_none(),
         interrupt: Some(Arc::clone(&interrupt)),
         disk: None,
+        command_runner: None,
     };
 
     let mut engine = Engine::load(&options.input_file, engine_options)?;
@@ -709,10 +715,7 @@ fn run_tool(
                         return Ok(0);
                     }
                     "depth" => {
-                        depth = args
-                            .get(1)
-                            .and_then(|d| d.parse::<i32>().ok())
-                            .unwrap_or(1);
+                        depth = args.get(1).and_then(|d| d.parse::<i32>().ok()).unwrap_or(1);
                     }
                     other => {
                         let known = ["rule", "depth", "all"];
@@ -721,9 +724,9 @@ fn run_tool(
                                 "{PROGRAM}: error: unknown target tool mode '{other}', \
                                  did you mean '{s}'?"
                             ),
-                            None => eprintln!(
-                                "{PROGRAM}: error: unknown target tool mode '{other}'"
-                            ),
+                            None => {
+                                eprintln!("{PROGRAM}: error: unknown target tool mode '{other}'")
+                            }
                         }
                         return Ok(1);
                     }

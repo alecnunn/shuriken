@@ -167,7 +167,7 @@ impl DepsLog {
             offset = pos;
 
             if is_deps {
-                if size % 4 != 0 || size < 12 {
+                if !size.is_multiple_of(4) || size < 12 {
                     read_failed = true;
                     break;
                 }
@@ -378,7 +378,9 @@ impl DepsLog {
         let padding = (4 - path_size % 4) % 4;
         let size = path_size + padding + 4;
         if size > MAX_RECORD_SIZE {
-            return Err(Error::build(format!("path '{path}' is too long for the deps log")));
+            return Err(Error::build(format!(
+                "path '{path}' is too long for the deps log"
+            )));
         }
 
         self.open_for_write_if_needed()?;

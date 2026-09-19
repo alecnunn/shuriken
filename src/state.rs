@@ -743,12 +743,13 @@ impl State {
 
     /// True once every input of `edge` has been produced.
     pub fn all_inputs_ready(&self, edge: EdgeId) -> bool {
-        self.edge(edge).inputs.iter().all(|&i| {
-            match self.node(i).in_edge {
+        self.edge(edge)
+            .inputs
+            .iter()
+            .all(|&i| match self.node(i).in_edge {
                 Some(e) => self.edge(e).outputs_ready,
                 None => true,
-            }
-        })
+            })
     }
 
     /// A human-readable dump of an edge, for `-d` style debugging.

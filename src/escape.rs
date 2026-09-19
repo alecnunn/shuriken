@@ -167,7 +167,7 @@ pub fn elide_middle_in_place(s: &mut String, max_width: usize) {
     if !s.as_bytes().contains(&0x1b) {
         const ELLIPSIS: usize = 3;
         if max_width <= ELLIPSIS {
-            s.truncate(0);
+            s.clear();
             s.push_str(&"..."[..max_width]);
             return;
         }

@@ -20,11 +20,7 @@ use crate::state::{EdgeId, NodeId, State};
 ///
 /// Supports ninja's `path^` syntax, which means "the first output of the first
 /// edge that consumes `path`".
-pub fn collect_target(
-    state: &State,
-    deps_log: Option<&DepsLog>,
-    path: &str,
-) -> Result<NodeId> {
+pub fn collect_target(state: &State, deps_log: Option<&DepsLog>, path: &str) -> Result<NodeId> {
     if path.is_empty() {
         return Err(Error::graph("empty path"));
     }
@@ -44,7 +40,10 @@ pub fn collect_target(
         } else if path == "help" {
             msg.push_str(", did you mean 'shuriken -h'?");
         } else if let Some(suggestion) = state.spellcheck_node(&path) {
-            msg.push_str(&format!(", did you mean '{}'?", state.node(suggestion).path()));
+            msg.push_str(&format!(
+                ", did you mean '{}'?",
+                state.node(suggestion).path()
+            ));
         }
         return Err(Error::graph(msg));
     };
@@ -137,7 +136,11 @@ pub fn graph(state: &mut State, disk: &dyn DiskInterface, targets: &[NodeId]) ->
                 out.push_str(&format!("\"e{}\" -> \"n{}\"\n", edge.0, o.0));
             }
             for (i, &input) in e.inputs().iter().enumerate() {
-                let order_only = if e.is_order_only(i) { " style=dotted" } else { "" };
+                let order_only = if e.is_order_only(i) {
+                    " style=dotted"
+                } else {
+                    ""
+                };
                 out.push_str(&format!(
                     "\"n{}\" -> \"e{}\" [arrowhead=none{}]\n",
                     input.0, edge.0, order_only
@@ -553,12 +556,24 @@ pub fn command_with_rspfile_expanded(state: &State, edge: EdgeId) -> String {
         return command;
     }
 
-    let content = state.edge_binding(edge, "rspfile_content").replace('\n', " ");
+    let content = state
+        .edge_binding(edge, "rspfile_content")
+        .replace('\n', " ");
     let before = &command[..index];
     if before.ends_with('@') {
-        format!("{}{}{}", &command[..index - 1], content, &command[index + rspfile.len()..])
+        format!(
+            "{}{}{}",
+            &command[..index - 1],
+            content,
+            &command[index + rspfile.len()..]
+        )
     } else if before.ends_with("-f ") {
-        format!("{}{}{}", &command[..index - 3], content, &command[index + rspfile.len()..])
+        format!(
+            "{}{}{}",
+            &command[..index - 3],
+            content,
+            &command[index + rspfile.len()..]
+        )
     } else if before.ends_with("--option-file=") {
         format!(
             "{}{}{}",
@@ -574,8 +589,7 @@ pub fn command_with_rspfile_expanded(state: &State, edge: EdgeId) -> String {
 /// `-t rules`: every rule name, optionally with its description.
 pub fn rules(state: &State, with_description: bool) -> String {
     let mut out = String::new();
-    let mut names: Vec<(&str, crate::eval::RuleId)> =
-        state.scopes.rules_in(ROOT_SCOPE).collect();
+    let mut names: Vec<(&str, crate::eval::RuleId)> = state.scopes.rules_in(ROOT_SCOPE).collect();
     names.sort_by(|a, b| a.0.cmp(b.0));
     for (name, id) in names {
         out.push_str(name);
@@ -830,10 +844,7 @@ mod tests {
         assert_eq!(targets_by_rule(&state, "cat"), "b\nc\n");
         assert_eq!(targets_source_list(&state), "a\n");
         assert_eq!(rules(&state, false), "cat\nphony\n");
-        assert_eq!(
-            targets_by_depth(&state, 1).unwrap(),
-            "c: cat\n"
-        );
+        assert_eq!(targets_by_depth(&state, 1).unwrap(), "c: cat\n");
     }
 
     #[test]
@@ -841,10 +852,7 @@ mod tests {
         let disk = MemDisk::new();
         let state = setup(&disk, &format!("{CAT}build b: cat a\nbuild c: cat b\n"));
         let c = state.lookup_node("c").unwrap();
-        assert_eq!(
-            commands(&state, &[c], false),
-            "cat a > b\ncat b > c\n"
-        );
+        assert_eq!(commands(&state, &[c], false), "cat a > b\ncat b > c\n");
         assert_eq!(commands(&state, &[c], true), "cat b > c\n");
     }
 
@@ -873,7 +881,10 @@ mod tests {
         let mut state = setup(&disk, &format!("{CAT}build b: cat a | i || o\n"));
         let b = state.lookup_node("b").unwrap();
         let out = query(&mut state, &disk, &[b]);
-        assert!(out.contains("b:\n  input: cat\n    a\n    | i\n    || o\n"), "{out}");
+        assert!(
+            out.contains("b:\n  input: cat\n    a\n    | i\n    || o\n"),
+            "{out}"
+        );
     }
 
     #[test]

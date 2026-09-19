@@ -182,13 +182,7 @@ impl Plan {
         }
 
         for input in state.edge(edge).inputs().to_vec() {
-            self.add_sub_target(
-                state,
-                input,
-                Some(node),
-                status,
-                dyndep_walk.as_mut().map(|w| &mut **w),
-            )?;
+            self.add_sub_target(state, input, Some(node), status, dyndep_walk.as_deref_mut())?;
         }
 
         Ok(true)
@@ -319,7 +313,11 @@ impl Plan {
     ) -> Result<()> {
         let want = match self.want.get(&edge) {
             Some(w) => *w,
-            None => return Err(Error::build("internal error: finished an edge not in the plan")),
+            None => {
+                return Err(Error::build(
+                    "internal error: finished an edge not in the plan",
+                ));
+            }
         };
         let directly_wanted = want != Want::Nothing;
 
@@ -419,10 +417,7 @@ impl Plan {
             };
 
             // Only reconsider this edge once all its real inputs are clean.
-            if non_order_only
-                .iter()
-                .any(|&i| scan.state().node(i).dirty)
-            {
+            if non_order_only.iter().any(|&i| scan.state().node(i).dirty) {
                 continue;
             }
 
@@ -610,9 +605,8 @@ impl Plan {
             }
         }
 
-        let weight_of = |state: &State, edge: EdgeId| -> i64 {
-            if state.edge_is_phony(edge) { 0 } else { 1 }
-        };
+        let weight_of =
+            |state: &State, edge: EdgeId| -> i64 { if state.edge_is_phony(edge) { 0 } else { 1 } };
 
         for &edge in &sorted {
             let w = weight_of(state, edge);
@@ -822,7 +816,10 @@ mod tests {
     fn order_only_input_still_gates_scheduling() {
         let disk = MemDisk::new();
         disk.create("a", "a");
-        let mut state = setup(&disk, &format!("{CAT}build oo: cat a\nbuild out: cat a || oo\n"));
+        let mut state = setup(
+            &disk,
+            &format!("{CAT}build oo: cat a\nbuild out: cat a || oo\n"),
+        );
         let out = scan_target(&mut state, &disk, "out");
         let mut plan = Plan::new();
         let mut status = NullStatus;

@@ -185,7 +185,11 @@ fn mtime_of(md: &fs::Metadata) -> i64 {
 #[cfg(not(unix))]
 fn mtime_of(md: &fs::Metadata) -> i64 {
     use std::time::UNIX_EPOCH;
-    match md.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()) {
+    match md
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+    {
         Some(d) => {
             let v = d.as_nanos() as i64;
             if v == 0 { 1 } else { v }

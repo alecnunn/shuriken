@@ -6,7 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// distance is known to exceed `max_edit_distance` (0 disables the cutoff).
 ///
 /// Matches ninja's `EditDistance`, so its spelling suggestions agree.
-pub fn edit_distance(a: &str, b: &str, allow_replacements: bool, max_edit_distance: usize) -> usize {
+pub fn edit_distance(
+    a: &str,
+    b: &str,
+    allow_replacements: bool,
+    max_edit_distance: usize,
+) -> usize {
     let s1 = a.as_bytes();
     let s2 = b.as_bytes();
     let m = s1.len();

@@ -268,7 +268,10 @@ pub fn load_dyndeps(
     // Every statement in the file must belong to an edge that asked for it.
     for (edge, dyndeps) in &ddf.entries {
         if !dyndeps.used {
-            let out = state.node(state.edge(*edge).outputs()[0]).path().to_string();
+            let out = state
+                .node(state.edge(*edge).outputs()[0])
+                .path()
+                .to_string();
             return Err(Error::build(format!(
                 "dyndep file '{path}' mentions output '{out}' whose build statement does not \
                  have a dyndep binding for the file"
@@ -391,14 +394,12 @@ mod tests {
     #[test]
     fn unknown_output_is_an_error() {
         let (mut state, disk) = setup();
-        disk.create(
-            "dd",
-            "ninja_dyndep_version = 1\nbuild nosuch: dyndep\n",
-        );
+        disk.create("dd", "ninja_dyndep_version = 1\nbuild nosuch: dyndep\n");
         let dd = state.lookup_node("dd").unwrap();
         let e = load_dyndeps(&mut state, &disk, dd).unwrap_err();
         assert!(
-            e.to_string().contains("no build statement exists for 'nosuch'"),
+            e.to_string()
+                .contains("no build statement exists for 'nosuch'"),
             "{e}"
         );
     }
@@ -409,7 +410,10 @@ mod tests {
         disk.create("dd", "ninja_dyndep_version = 1\n");
         let dd = state.lookup_node("dd").unwrap();
         let e = load_dyndeps(&mut state, &disk, dd).unwrap_err();
-        assert!(e.to_string().contains("not mentioned in its dyndep file"), "{e}");
+        assert!(
+            e.to_string().contains("not mentioned in its dyndep file"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -421,6 +425,9 @@ mod tests {
         );
         let dd = state.lookup_node("dd").unwrap();
         let e = load_dyndeps(&mut state, &disk, dd).unwrap_err();
-        assert!(e.to_string().contains("explicit inputs not supported"), "{e}");
+        assert!(
+            e.to_string().contains("explicit inputs not supported"),
+            "{e}"
+        );
     }
 }

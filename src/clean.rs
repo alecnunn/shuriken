@@ -190,10 +190,7 @@ impl<'a> Cleaner<'a> {
             canonicalize_path(&mut name);
             match self.state.lookup_node(&name) {
                 Some(node) => self.do_clean_target(node),
-                None => self
-                    .report
-                    .errors
-                    .push(format!("unknown target '{name}'")),
+                None => self.report.errors.push(format!("unknown target '{name}'")),
             }
         }
         self.report.clone()
@@ -306,8 +303,7 @@ mod tests {
         disk.create("b", "x");
         disk.create("c", "x");
         let mut state = setup(&disk, &format!("{CAT}build b: cat a\nbuild c: cat b\n"));
-        let report =
-            Cleaner::new(&mut state, &disk, false).clean_targets(&["c".to_string()]);
+        let report = Cleaner::new(&mut state, &disk, false).clean_targets(&["c".to_string()]);
         assert_eq!(report.count, 2);
         assert!(disk.contains("a"));
         assert!(!disk.contains("b"));
