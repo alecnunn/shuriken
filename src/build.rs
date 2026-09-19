@@ -619,9 +619,13 @@ impl<'a> Builder<'a> {
     /// mistake a half-written file for a finished one.
     pub fn cleanup(&mut self) {
         if let Some(runner) = self.command_runner.as_deref_mut() {
-            let active = runner.active_edges();
             runner.abort();
 
+            // Every edge we started but never reaped may have written a partial
+            // output. (Asking the runner which commands are still alive would
+            // race with them exiting, which is exactly what happens when a
+            // signal kills the whole process group.)
+            let active: Vec<EdgeId> = self.running_edges.keys().copied().collect();
             for edge in active {
                 let depfile = self.state.edge_depfile(edge);
                 for output in self.state.edge(edge).outputs().to_vec() {

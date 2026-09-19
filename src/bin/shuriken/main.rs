@@ -467,7 +467,10 @@ fn run(options: Options, config: BuildConfig) -> Result<i32> {
 
     let summary = match engine.build_with_status(&options.targets, &mut status) {
         Ok(s) => s,
-        Err(Error::Interrupted) => return Ok(ExitStatus::INTERRUPTED.code()),
+        Err(Error::Interrupted) => {
+            status.info("build stopped: interrupted by user.");
+            return Ok(ExitStatus::INTERRUPTED.code());
+        }
         Err(e @ (Error::Graph(_) | Error::Manifest(_) | Error::Io(..))) => {
             status.error(&e.to_string());
             return Ok(1);
