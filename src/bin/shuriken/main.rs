@@ -105,10 +105,12 @@ fn real_main() -> i32 {
     let outcome = match worker {
         Ok(handle) => handle.join(),
         // Without a thread, fall back to running inline.
-        Err(_) => return match run_inline() {
-            Ok(code) => code,
-            Err(e) => report_error(&e),
-        },
+        Err(_) => {
+            return match run_inline() {
+                Ok(code) => code,
+                Err(e) => report_error(&e),
+            };
+        }
     };
 
     match outcome {
@@ -246,7 +248,7 @@ fn parse_args(args: &[String]) -> Parsed {
                         Ok(true) => {}
                         Ok(false) => return Parsed::Exit(0),
                         Err(msg) => {
-                            eprintln!("{PROGRAM}: {msg}");
+                            eprintln!("{PROGRAM}: error: {msg}");
                             return Parsed::Exit(1);
                         }
                     },
@@ -311,7 +313,7 @@ fn parse_args(args: &[String]) -> Parsed {
                         Ok(true) => {}
                         Ok(false) => return Parsed::Exit(0),
                         Err(msg) => {
-                            eprintln!("{PROGRAM}: {msg}");
+                            eprintln!("{PROGRAM}: error: {msg}");
                             return Parsed::Exit(1);
                         }
                     },

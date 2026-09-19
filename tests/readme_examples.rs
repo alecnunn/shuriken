@@ -18,7 +18,11 @@ fn inspect_the_graph() -> shuriken::Result<()> {
     let engine = Engine::load("build.ninja", EngineOptions::default())?;
     let state = engine.state();
     for edge in state.edge_ids() {
-        println!("{} <- {}", state.edge_rule_name(edge), state.edge_command(edge));
+        println!(
+            "{} <- {}",
+            state.edge_rule_name(edge),
+            state.edge_command(edge)
+        );
     }
     print!("{}", tools::targets_all(state));
     Ok(())

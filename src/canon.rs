@@ -47,7 +47,7 @@ pub fn canonicalize_bytes(v: &mut Vec<u8>) -> u64 {
 
     let mut dst: usize = 0;
     let mut src: usize = 0;
-    let mut dst_start: usize;
+    let dst_start: usize;
 
     if is_path_separator(v[0]) {
         // For absolute paths, keep the leading separator (two of them for
@@ -168,8 +168,6 @@ pub fn canonicalize_bytes(v: &mut Vec<u8>) -> u64 {
         dst = 1;
     }
     v.truncate(dst);
-    dst_start = dst_start.min(dst); // silence unused-assignment lint on unix
-    let _ = dst_start;
 
     if cfg!(windows) {
         let mut bits: u64 = 0;

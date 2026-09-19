@@ -49,15 +49,16 @@ pub fn parse_show_includes(output: &str, deps_prefix: &str) -> ShowIncludes {
     let mut filtered_output = String::new();
     let mut seen_show_includes = false;
 
-    for line in output.split_inclusive(['\r', '\n']) {
-        let line = line.trim_end_matches(['\r', '\n']);
-        // `split_inclusive` yields an entry for the second half of "\r\n"; skip
-        // the empty leftovers it produces.
-        if line.is_empty() && !output.is_empty() {
-            // Preserve genuinely blank lines, but not the artefacts of CRLF.
-            // A blank line is one whose separator we just stripped.
-            continue;
+    // Walk the output line by line, keeping empty lines, exactly as ninja's
+    // CLParser does.
+    let bytes = output.as_bytes();
+    let mut start = 0usize;
+    while start < bytes.len() {
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b'\r' && bytes[end] != b'\n' {
+            end += 1;
         }
+        let line = &output[start..end];
 
         if let Some(include) = filter_show_includes(line, deps_prefix) {
             seen_show_includes = true;
@@ -67,11 +68,19 @@ pub fn parse_show_includes(output: &str, deps_prefix: &str) -> ShowIncludes {
                 includes.push(normalized);
             }
         } else if !seen_show_includes && is_input_filename(line) {
-            // The echoed input filename is dropped.
+            // cl.exe echoes the name of the file it is compiling; drop it.
         } else {
             filtered_output.push_str(line);
             filtered_output.push('\n');
         }
+
+        if end < bytes.len() && bytes[end] == b'\r' {
+            end += 1;
+        }
+        if end < bytes.len() && bytes[end] == b'\n' {
+            end += 1;
+        }
+        start = end;
     }
 
     includes.sort();
@@ -109,6 +118,12 @@ mod tests {
                       Note: including file: mine.h\n";
         let r = parse_show_includes(output, "");
         assert_eq!(r.includes, vec!["mine.h"]);
+    }
+
+    #[test]
+    fn keeps_blank_lines() {
+        let r = parse_show_includes("first\n\nsecond\n", "");
+        assert_eq!(r.filtered_output, "first\n\nsecond\n");
     }
 
     #[test]
