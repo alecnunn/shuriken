@@ -651,10 +651,14 @@ mod tests {
     fn shell_escaping_in_command() {
         let s =
             parse("rule cat\n  command = cat $in > $out\n\nbuild out put: cat in$ put\n").unwrap();
-        assert_eq!(
-            s.edge_command(crate::state::EdgeId(0)),
+        // Escaping follows the host: single quotes for a POSIX shell, double
+        // quotes for the Windows command line.
+        let expected = if cfg!(windows) {
+            "cat \"in put\" > out put"
+        } else {
             "cat 'in put' > out put"
-        );
+        };
+        assert_eq!(s.edge_command(crate::state::EdgeId(0)), expected);
     }
 
     #[test]

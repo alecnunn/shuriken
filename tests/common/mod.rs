@@ -77,11 +77,87 @@ impl TempDir {
             .expect("utf-8 path")
             .to_string()
     }
+
+    /// `dir/name` spelled for a ninja manifest: native separators, with `:`
+    /// and ` ` escaped as the syntax requires. A Windows absolute path like
+    /// `C:\\...` needs this, exactly as it would from any manifest generator.
+    pub fn manifest_path(&self, name: &str) -> String {
+        self.join(name).replace(':', "$:").replace(' ', "$ ")
+    }
 }
 
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// A `command =` body that copies `$in` to `$out` on the host.
+pub fn copy_cmd() -> &'static str {
+    if cfg!(windows) {
+        "cmd /c copy /y $in $out"
+    } else {
+        "cp $in $out"
+    }
+}
+
+/// The same copy, spelled differently, for tests that need the command line to
+/// change without changing what it does.
+pub fn copy_cmd_variant() -> &'static str {
+    if cfg!(windows) {
+        "cmd /c copy /y /b $in $out"
+    } else {
+        "cp -f $in $out"
+    }
+}
+
+/// A `command =` body that creates an empty `$out`.
+pub fn touch_cmd() -> &'static str {
+    if cfg!(windows) {
+        "cmd /c type nul > $out"
+    } else {
+        "touch $out"
+    }
+}
+
+/// A `command =` body that does nothing at all successfully.
+pub fn no_op_cmd() -> &'static str {
+    if cfg!(windows) { "cmd /c exit 0" } else { "true" }
+}
+
+/// A `command =` body that exits with `code` without writing anything.
+pub fn exit_cmd(code: i32) -> String {
+    if cfg!(windows) {
+        format!("cmd /c exit {code}")
+    } else {
+        format!("exit {code}")
+    }
+}
+
+/// A `command =` body that prints `text` on stdout.
+pub fn echo_cmd(text: &str) -> String {
+    if cfg!(windows) {
+        format!("cmd /c echo {text}")
+    } else {
+        format!("echo {text}")
+    }
+}
+
+/// A `command =` body that prints `text` on stderr and then fails with `code`.
+pub fn fail_loudly_cmd(text: &str, code: i32) -> String {
+    if cfg!(windows) {
+        format!("cmd /c \"echo {text} 1>&2 & exit {code}\"")
+    } else {
+        format!("echo {text} 1>&2 && exit {code}")
+    }
+}
+
+/// A `command =` body that writes the contents of `src` into `$out`.
+pub fn cat_into_out_cmd(src: &str) -> String {
+    if cfg!(windows) {
+        format!("cmd /c type {src} > $out")
+    } else {
+        format!("cat {src} > $out")
     }
 }
 

@@ -279,9 +279,9 @@ fn engine_can_use_a_custom_command_runner() {
         "build.ninja",
         &format!(
             "builddir = {}\n{CAT}build {}: cat {}\n",
-            dir.path().display(),
-            dir.join("b"),
-            dir.join("a")
+            dir.manifest_path(""),
+            dir.manifest_path("b"),
+            dir.manifest_path("a")
         ),
     );
 

@@ -18,11 +18,12 @@ static INTERRUPT_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 /// lets the build loop notice, stop starting work, and clean up half-written
 /// outputs before exiting.
 pub fn install_interrupt_handler(flag: Arc<AtomicBool>) {
-    if INTERRUPT_FLAG.set(flag).is_err() {
-        return; // Already installed.
+    // A second call would have nothing to install against, since the handler
+    // reads the flag set by the first.
+    if INTERRUPT_FLAG.set(flag).is_ok() {
+        #[cfg(unix)]
+        unix::install();
     }
-    #[cfg(unix)]
-    unix::install();
 }
 
 /// The terminal width in columns, if stdout is a terminal.

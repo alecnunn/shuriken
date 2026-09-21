@@ -635,19 +635,42 @@ mod tests {
         }
     }
 
+    /// Spells `dir/name` for the manifest: native separators (mixing them
+    /// leaves `$in` half-and-half, which is faithful to ninja but not what any
+    /// real generator emits) and `:`/` ` escaped, which a Windows absolute
+    /// path like `C:\\...` needs.
+    fn manifest_path(dir: &Tmp, name: &str) -> String {
+        dir.0
+            .join(name)
+            .to_str()
+            .expect("utf-8 path")
+            .replace(':', "$:")
+            .replace(' ', "$ ")
+    }
+
+    /// A rule body that copies `$in` to `$out` on the host.
+    fn copy_rule() -> &'static str {
+        if cfg!(windows) {
+            "rule copy\n  command = cmd /c copy $in $out\n\n"
+        } else {
+            "rule copy\n  command = cp $in $out\n\n"
+        }
+    }
+
     #[test]
     fn end_to_end_build() {
         // Absolute paths throughout, so the test never depends on (or changes)
         // the process-wide working directory.
         let tmp = Tmp::new("e2e");
-        let dir = tmp.0.to_str().unwrap().to_string();
         tmp.write("in.txt", "hello\n");
+        let (m_dir, m_out, m_in) = (
+            manifest_path(&tmp, ""),
+            manifest_path(&tmp, "out.txt"),
+            manifest_path(&tmp, "in.txt"),
+        );
         tmp.write(
             "build.ninja",
-            &format!(
-                "builddir = {dir}\nrule copy\n  command = cp $in $out\n\n\
-                 build {dir}/out.txt: copy {dir}/in.txt\n"
-            ),
+            &format!("builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n", copy_rule()),
         );
 
         let mut engine = Engine::load(
@@ -662,7 +685,7 @@ mod tests {
             },
         )
         .unwrap();
-        let summary = engine.build(&[format!("{dir}/out.txt")]).unwrap();
+        let summary = engine.build(&[tmp.path("out.txt")]).unwrap();
 
         assert!(!summary.up_to_date);
         assert_eq!(summary.edges_finished, 1);
@@ -677,14 +700,15 @@ mod tests {
     #[test]
     fn second_build_is_a_no_op() {
         let tmp = Tmp::new("noop");
-        let dir = tmp.0.to_str().unwrap().to_string();
         tmp.write("in.txt", "hello\n");
+        let (m_dir, m_out, m_in) = (
+            manifest_path(&tmp, ""),
+            manifest_path(&tmp, "out.txt"),
+            manifest_path(&tmp, "in.txt"),
+        );
         tmp.write(
             "build.ninja",
-            &format!(
-                "builddir = {dir}\nrule copy\n  command = cp $in $out\n\n\
-                 build {dir}/out.txt: copy {dir}/in.txt\n"
-            ),
+            &format!("builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n", copy_rule()),
         );
 
         let opts = || EngineOptions {
@@ -695,7 +719,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let target = format!("{dir}/out.txt");
+        let target = tmp.path("out.txt");
 
         let first = {
             let mut engine = Engine::load(tmp.path("build.ninja"), opts()).unwrap();

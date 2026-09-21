@@ -530,6 +530,16 @@ mod tests {
     use crate::disk::MemDisk;
     use crate::parse::{ManifestParser, ParserOptions};
 
+    /// Spells a trivial shell command for the host: Windows has no `echo`
+    /// binary, so it goes through `cmd`.
+    fn shell(command: &str) -> String {
+        if cfg!(windows) {
+            format!("cmd /c \"{command}\"")
+        } else {
+            command.to_string()
+        }
+    }
+
     fn state_with(command: &str) -> State {
         let disk = MemDisk::new();
         let mut state = State::new();
@@ -550,7 +560,7 @@ mod tests {
 
     #[test]
     fn runs_a_command_and_captures_output() {
-        let state = state_with("echo hello");
+        let state = state_with(&shell("echo hello"));
         let mut runner = RealCommandRunner::new(1);
         runner.start_command(&state, EdgeId(0)).unwrap();
         let result = runner.wait_for_command().unwrap();
@@ -560,7 +570,7 @@ mod tests {
 
     #[test]
     fn reports_failure_codes() {
-        let state = state_with("exit 3");
+        let state = state_with(&shell("exit 3"));
         let mut runner = RealCommandRunner::new(1);
         runner.start_command(&state, EdgeId(0)).unwrap();
         let result = runner.wait_for_command().unwrap();
@@ -569,7 +579,7 @@ mod tests {
 
     #[test]
     fn merges_stdout_and_stderr() {
-        let state = state_with("echo out; echo err 1>&2");
+        let state = state_with(&shell(if cfg!(windows) { "echo out & echo err 1>&2" } else { "echo out; echo err 1>&2" }));
         let mut runner = RealCommandRunner::new(1);
         runner.start_command(&state, EdgeId(0)).unwrap();
         let result = runner.wait_for_command().unwrap();
@@ -579,7 +589,7 @@ mod tests {
 
     #[test]
     fn capacity_tracks_running_commands() {
-        let state = state_with("true");
+        let state = state_with(&shell(if cfg!(windows) { "exit 0" } else { "true" }));
         let mut runner = RealCommandRunner::new(2);
         assert_eq!(runner.can_run_more(), 2);
         runner.start_command(&state, EdgeId(0)).unwrap();
@@ -590,7 +600,7 @@ mod tests {
 
     #[test]
     fn dry_run_runner() {
-        let state = state_with("false");
+        let state = state_with(&shell(if cfg!(windows) { "exit 1" } else { "false" }));
         let mut runner = DryRunCommandRunner::new();
         runner.start_command(&state, EdgeId(0)).unwrap();
         let r = runner.wait_for_command().unwrap();

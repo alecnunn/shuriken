@@ -62,6 +62,28 @@ Starts a slow build, sends SIGINT (then SIGTERM) to the build tool, and checks
 that both tools agree on the exit code, on deleting the partially written
 output, and on removing `.ninja_lock`.
 
+## Testing the Windows build from Linux
+
+[cargo-xwin](https://github.com/rust-cross/cargo-xwin) supplies the MSVC CRT and
+SDK so the crate cross-compiles, and Wine runs the result, so the Windows-only
+code paths can be exercised without a Windows machine:
+
+```sh
+cargo install cargo-xwin          # needs clang-cl, lld-link and llvm-lib
+export WINEDEBUG=-all
+CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER=wine \
+  cargo xwin test --target x86_64-pc-windows-msvc
+cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets
+```
+
+Six CLI tests are `#[cfg(unix)]`: they need a POSIX shell to write depfiles,
+sleep, or run a generator script. Everything else runs, including builds that
+spawn real processes through the `CreateProcess`-style launcher.
+
+Wine is close to Windows, not identical to it — its filesystem layer is
+case-insensitive over a case-sensitive one, for instance — so this catches
+portability mistakes rather than replacing a real Windows run.
+
 ## `bench.py` — timings
 
 ```sh

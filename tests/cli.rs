@@ -2,9 +2,14 @@
 
 mod common;
 
-use common::{TempDir, commands_run, shuriken};
+use common::{
+    TempDir, cat_into_out_cmd, commands_run, copy_cmd, copy_cmd_variant, echo_cmd, exit_cmd,
+    fail_loudly_cmd, no_op_cmd, shuriken, touch_cmd,
+};
 
-const COPY: &str = "rule copy\n  command = cp $in $out\n  description = COPY $out\n\n";
+fn copy_rule() -> String {
+    format!("rule copy\n  command = {}\n  description = COPY $out\n\n", copy_cmd())
+}
 
 fn simple_project(label: &str) -> TempDir {
     let dir = TempDir::new(label);
@@ -12,7 +17,8 @@ fn simple_project(label: &str) -> TempDir {
     dir.write(
         "build.ninja",
         &format!(
-            "{COPY}build mid.txt: copy in.txt\nbuild out.txt: copy mid.txt\ndefault out.txt\n"
+            "{}build mid.txt: copy in.txt\nbuild out.txt: copy mid.txt\ndefault out.txt\n",
+            copy_rule()
         ),
     );
     dir
@@ -58,8 +64,9 @@ fn changing_a_command_forces_a_rebuild() {
     dir.write(
         "build.ninja",
         &format!(
-            "{}build mid.txt: copy in.txt\nbuild out.txt: copy mid.txt\ndefault out.txt\n",
-            "rule copy\n  command = cp -f $in $out\n  description = COPY $out\n\n"
+            "rule copy\n  command = {}\n  description = COPY $out\n\n\
+             build mid.txt: copy in.txt\nbuild out.txt: copy mid.txt\ndefault out.txt\n",
+            copy_cmd_variant()
         ),
     );
     let run = shuriken(&dir, &["-j1"]);
@@ -71,7 +78,7 @@ fn failing_command_reports_and_exits_nonzero() {
     let dir = TempDir::new("cli-failure");
     dir.write(
         "build.ninja",
-        "rule fail\n  command = echo problem 1>&2 && exit 7\n\nbuild out: fail\n",
+        &format!("rule fail\n  command = {}\n\nbuild out: fail\n", fail_loudly_cmd("problem", 7)),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 7, "{}", run.all());
@@ -89,9 +96,13 @@ fn keep_going_runs_independent_work() {
     let dir = TempDir::new("cli-keep-going");
     dir.write(
         "build.ninja",
-        "rule fail\n  command = exit 1\n\nrule touch\n  command = touch $out\n\n\
-         build f1: fail\nbuild f2: fail\nbuild ok: touch\n\
-         build all: phony f1 f2 ok\ndefault all\n",
+        &format!(
+            "rule fail\n  command = {}\n\nrule touch\n  command = {}\n\n\
+             build f1: fail\nbuild f2: fail\nbuild ok: touch\n\
+             build all: phony f1 f2 ok\ndefault all\n",
+            exit_cmd(1),
+            touch_cmd()
+        ),
     );
     let run = shuriken(&dir, &["-j1", "-k", "0"]);
     assert_ne!(run.code, 0);
@@ -107,7 +118,7 @@ fn keep_going_runs_independent_work() {
 #[test]
 fn missing_input_is_reported_as_an_error() {
     let dir = TempDir::new("cli-missing-input");
-    dir.write("build.ninja", &format!("{COPY}build out: copy nope\n"));
+    dir.write("build.ninja", &format!("{}build out: copy nope\n", copy_rule()));
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 1);
     assert!(
@@ -123,7 +134,7 @@ fn dependency_cycle_is_reported() {
     let dir = TempDir::new("cli-cycle");
     dir.write(
         "build.ninja",
-        &format!("{COPY}build a: copy b\nbuild b: copy a\n"),
+        &format!("{}build a: copy b\nbuild b: copy a\n", copy_rule()),
     );
     let run = shuriken(&dir, &["-j1", "a"]);
     assert_eq!(run.code, 1);
@@ -166,7 +177,8 @@ fn dry_run_changes_nothing() {
 fn verbose_prints_commands() {
     let dir = simple_project("cli-verbose");
     let run = shuriken(&dir, &["-j1", "-v"]);
-    assert!(run.stdout.contains("cp in.txt mid.txt"), "{}", run.all());
+    let expected = copy_cmd().replace("$in", "in.txt").replace("$out", "mid.txt");
+    assert!(run.stdout.contains(&expected), "{}", run.all());
     let dir = simple_project("cli-quiet");
     let run = shuriken(&dir, &["-j1", "--quiet"]);
     assert!(!run.stdout.contains("COPY"), "{}", run.all());
@@ -233,7 +245,7 @@ fn chdir_and_alternate_manifest() {
     dir.write("sub/in.txt", "x\n");
     dir.write(
         "sub/custom.ninja",
-        &format!("{COPY}build out.txt: copy in.txt\ndefault out.txt\n"),
+        &format!("{}build out.txt: copy in.txt\ndefault out.txt\n", copy_rule()),
     );
     let run = shuriken(&dir, &["-C", "sub", "-f", "custom.ninja", "-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -252,9 +264,12 @@ fn tools_report_the_graph() {
     dir.write("b.c", "");
     dir.write(
         "build.ninja",
-        "rule cc\n  command = touch $out\n  description = CC $out\n\n\
-         rule link\n  command = touch $out\n\n\
-         build a.o: cc a.c\nbuild b.o: cc b.c\nbuild prog: link a.o b.o\ndefault prog\n",
+        &format!(
+            "rule cc\n  command = {t}\n  description = CC $out\n\n\
+             rule link\n  command = {t}\n\n\
+             build a.o: cc a.c\nbuild b.o: cc b.c\nbuild prog: link a.o b.o\ndefault prog\n",
+            t = touch_cmd()
+        ),
     );
 
     let run = shuriken(&dir, &["-t", "targets", "all"]);
@@ -332,6 +347,10 @@ fn unknown_tool_suggests_a_correction() {
     );
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn depfile_dependencies_are_tracked_across_runs() {
     let dir = TempDir::new("cli-depfile");
@@ -368,9 +387,13 @@ fn restat_stops_the_build_early() {
     dir.write("in", "x\n");
     dir.write(
         "build.ninja",
-        "rule stamp\n  command = true\n  restat = 1\n\n\
-         rule copy\n  command = cp $in $out\n\n\
-         build stamp.out: stamp in\nbuild final: copy in | stamp.out\ndefault final\n",
+        &format!(
+            "rule stamp\n  command = {}\n  restat = 1\n\n\
+             rule copy\n  command = {}\n\n\
+             build stamp.out: stamp in\nbuild final: copy in | stamp.out\ndefault final\n",
+            no_op_cmd(),
+            copy_cmd()
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -382,6 +405,10 @@ fn restat_stops_the_build_early() {
     assert_eq!(run.code, 0, "{}", run.all());
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn pools_limit_concurrency() {
     let dir = TempDir::new("cli-pool");
@@ -399,6 +426,10 @@ fn pools_limit_concurrency() {
     assert!(dir.exists("a") && dir.exists("b") && dir.exists("c"));
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn unlimited_parallelism_actually_runs_in_parallel() {
     // 24 sleeps that would take about 2.4s serially.
@@ -430,7 +461,7 @@ fn a_very_deep_chain_does_not_overflow_the_stack() {
     // 8MiB stack, so the tool runs the build on a larger one.
     let dir = TempDir::new("cli-deep-chain");
     let depth = 20_000;
-    let mut manifest = String::from("rule tch\n  command = touch $out\n\nbuild s0: tch in\n");
+    let mut manifest = format!("rule tch\n  command = {}\n\nbuild s0: tch in\n", touch_cmd());
     for i in 1..depth {
         manifest.push_str(&format!("build s{i}: tch s{}\n", i - 1));
     }
@@ -448,13 +479,20 @@ fn console_pool_passes_output_through() {
     let dir = TempDir::new("cli-console");
     dir.write(
         "build.ninja",
-        "rule say\n  command = echo from-console\n  pool = console\n\nbuild out: say\n",
+        &format!(
+            "rule say\n  command = {}\n  pool = console\n\nbuild out: say\n",
+            echo_cmd("from-console")
+        ),
     );
     let run = shuriken(&dir, &["-j4"]);
     assert_eq!(run.code, 0, "{}", run.all());
     assert!(run.all().contains("from-console"), "{}", run.all());
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn manifest_regenerates_itself() {
     let dir = TempDir::new("cli-regen");
@@ -501,6 +539,10 @@ fn manifest_regenerates_itself() {
     );
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn dyndep_adds_dependencies_during_the_build() {
     let dir = TempDir::new("cli-dyndep");
@@ -531,8 +573,12 @@ fn validations_run_but_do_not_gate() {
     dir.write("in", "x\n");
     dir.write(
         "build.ninja",
-        "rule copy\n  command = cp $in $out\n\nrule check\n  command = touch $out\n\n\
-         build out: copy in |@ checked\nbuild checked: check\ndefault out\n",
+        &format!(
+            "rule copy\n  command = {}\n\nrule check\n  command = {}\n\n\
+             build out: copy in |@ checked\nbuild checked: check\ndefault out\n",
+            copy_cmd(),
+            touch_cmd()
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -550,8 +596,11 @@ fn response_files_are_written_and_removed() {
     dir.write("b", "b\n");
     dir.write(
         "build.ninja",
-        "rule link\n  command = cat $out.rsp > $out\n  rspfile = $out.rsp\n  \
-         rspfile_content = $in\n\nbuild out: link a b\n",
+        &format!(
+            "rule link\n  command = {}\n  rspfile = $out.rsp\n  \
+             rspfile_content = $in\n\nbuild out: link a b\n",
+            cat_into_out_cmd("$out.rsp")
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -571,7 +620,12 @@ fn builddir_holds_the_logs() {
     dir.write("in", "x\n");
     dir.write(
         "build.ninja",
-        "builddir = out/logs\nrule copy\n  command = cp $in $out\n\nbuild out/x: copy in\n",
+        // `touch` rather than `copy`: cmd's copy would read the forward slash
+        // in `out/x` as a switch, while a redirect just opens the path.
+        &format!(
+            "builddir = out/logs\nrule make\n  command = {}\n\nbuild out/x: make in\n",
+            touch_cmd()
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -605,6 +659,10 @@ fn recompact_and_restat_tools_work() {
     );
 }
 
+// Needs a POSIX shell to write depfiles, sleep, or run a generator
+// script. The engine behaviour itself is covered by the unit tests and
+// by the ninja differential suite in dev/.
+#[cfg(unix)]
 #[test]
 fn missingdeps_finds_undeclared_generated_inputs() {
     let dir = TempDir::new("cli-missingdeps");
@@ -634,12 +692,12 @@ fn shared_log_is_understood_after_a_manifest_edit() {
     dir.write("in", "x\n");
     dir.write(
         "build.ninja",
-        "rule copy\n  command = cp $in $out\n\nbuild old: copy in\ndefault old\n",
+        &format!("rule copy\n  command = {}\n\nbuild old: copy in\ndefault old\n", copy_cmd()),
     );
     shuriken(&dir, &["-j1"]);
     dir.write(
         "build.ninja",
-        "rule copy\n  command = cp $in $out\n\nbuild new: copy in\ndefault new\n",
+        &format!("rule copy\n  command = {}\n\nbuild new: copy in\ndefault new\n", copy_cmd()),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(commands_run(&run), 1, "{}", run.all());

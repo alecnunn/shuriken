@@ -126,6 +126,11 @@ impl DiskInterface for RealDiskInterface {
                 Ok(md) => {
                     let mut perms = md.permissions();
                     if perms.readonly() {
+                        // Clears the Windows read-only attribute so the file
+                        // can be deleted, which is what ninja does; the lint's
+                        // world-writable concern is a Unix one and this branch
+                        // is Windows-only.
+                        #[allow(clippy::permissions_set_readonly_false)]
                         perms.set_readonly(false);
                         let _ = fs::set_permissions(p, perms);
                     }
