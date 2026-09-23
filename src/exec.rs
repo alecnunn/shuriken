@@ -146,6 +146,9 @@ pub struct RealCommandRunner {
     result_rx: Receiver<CommandResult>,
     /// Workers currently waiting for a job.
     idle: Arc<AtomicUsize>,
+    /// Jobs sent to the queue that no worker has picked up yet. An idle worker
+    /// is only free for a new job once these are accounted for.
+    queued: Arc<AtomicUsize>,
     workers: Vec<std::thread::JoinHandle<()>>,
     running: Arc<Mutex<Vec<RunningJob>>>,
     interrupt: Arc<AtomicBool>,
@@ -179,6 +182,7 @@ impl RealCommandRunner {
             result_tx,
             result_rx,
             idle: Arc::new(AtomicUsize::new(0)),
+            queued: Arc::new(AtomicUsize::new(0)),
             workers: Vec::new(),
             running: Arc::new(Mutex::new(Vec::new())),
             interrupt: Arc::new(AtomicBool::new(false)),
@@ -211,6 +215,7 @@ impl RealCommandRunner {
         let job_rx = Arc::clone(&self.job_rx);
         let result_tx = self.result_tx.clone();
         let idle = Arc::clone(&self.idle);
+        let queued = Arc::clone(&self.queued);
         let running = Arc::clone(&self.running);
         let launcher = Arc::clone(&self.launcher);
         let name = format!("shuriken-worker-{}", self.workers.len());
@@ -235,6 +240,7 @@ impl RealCommandRunner {
                     let Ok(job) = job else {
                         return; // The runner went away.
                     };
+                    queued.fetch_sub(1, Ordering::SeqCst);
 
                     let child_slot: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
                     running
@@ -315,8 +321,14 @@ impl CommandRunner for RealCommandRunner {
             .map_err(crate::error::Error::build)?;
         let use_console = state.edge_use_console(edge);
 
-        // Grow the pool only when every worker is busy.
-        if self.idle.load(Ordering::SeqCst) == 0 && self.workers.len() < self.parallelism {
+        // Grow the pool unless a worker is genuinely free for this job.
+        // Workers register as idle before they block on the queue, and those
+        // waiting their turn behind an already-queued job are not available,
+        // so `idle` alone would leave the pool stuck at one or two workers
+        // whenever the workers win the race against this thread.
+        if self.idle.load(Ordering::SeqCst) <= self.queued.load(Ordering::SeqCst)
+            && self.workers.len() < self.parallelism
+        {
             if let Err(e) = self.spawn_worker() {
                 // Out of threads: keep going with the workers we have, unless
                 // there are none at all and nothing could ever run.
@@ -331,11 +343,14 @@ impl CommandRunner for RealCommandRunner {
             command,
             use_console,
         };
+        self.queued.fetch_add(1, Ordering::SeqCst);
         match self.job_tx.as_ref() {
-            Some(tx) => tx
-                .send(job)
-                .map_err(|_| crate::error::Error::build("build worker pool has shut down"))?,
+            Some(tx) => tx.send(job).map_err(|_| {
+                self.queued.fetch_sub(1, Ordering::SeqCst);
+                crate::error::Error::build("build worker pool has shut down")
+            })?,
             None => {
+                self.queued.fetch_sub(1, Ordering::SeqCst);
                 return Err(crate::error::Error::build(
                     "build worker pool has shut down",
                 ));
@@ -540,6 +555,28 @@ mod tests {
         }
     }
 
+    /// A state with `n` independent edges, all running `command`.
+    fn state_with_n(command: &str, n: usize) -> State {
+        let disk = MemDisk::new();
+        let mut state = State::new();
+        {
+            let mut p = ManifestParser::new(
+                &mut state,
+                &disk,
+                ParserOptions {
+                    quiet: true,
+                    ..Default::default()
+                },
+            );
+            let mut manifest = format!("rule r\n  command = {command}\n\n");
+            for i in 0..n {
+                manifest.push_str(&format!("build out{i}: r\n"));
+            }
+            p.parse_text("input", manifest.as_bytes()).unwrap();
+        }
+        state
+    }
+
     fn state_with(command: &str) -> State {
         let disk = MemDisk::new();
         let mut state = State::new();
@@ -600,6 +637,42 @@ mod tests {
         assert_eq!(runner.can_run_more(), 1);
         let _ = runner.wait_for_command().unwrap();
         assert_eq!(runner.can_run_more(), 2);
+    }
+
+    #[test]
+    fn the_pool_grows_to_run_commands_concurrently() {
+        // Regression test: workers count themselves idle before they block on
+        // the job queue, so a pool sized from `idle` alone would stall at one
+        // or two workers and run everything one at a time.
+        let n = 6;
+        let sleep = shell(if cfg!(windows) {
+            "ping -n 2 127.0.0.1 > nul"
+        } else {
+            "sleep 0.3"
+        });
+        let state = state_with_n(&sleep, n);
+        let mut runner = RealCommandRunner::new(n);
+
+        let start = std::time::Instant::now();
+        for i in 0..n {
+            runner.start_command(&state, EdgeId(i as u32)).unwrap();
+        }
+        // Nothing can have finished yet, so every command needs its own worker.
+        assert_eq!(
+            runner.workers.len(),
+            n,
+            "pool did not grow: {} workers for {n} concurrent commands",
+            runner.workers.len()
+        );
+        for _ in 0..n {
+            assert!(runner.wait_for_command().unwrap().success());
+        }
+        // Serially this would take n times as long.
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(300 * n as u64 / 2),
+            "commands did not overlap, took {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
