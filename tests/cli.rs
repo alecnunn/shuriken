@@ -446,9 +446,16 @@ fn pools_limit_concurrency() {
 #[cfg(unix)]
 #[test]
 fn unlimited_parallelism_actually_runs_in_parallel() {
-    // 24 sleeps that would take about 2.4s serially.
+    // Measures overlap, not elapsed time: each command brackets a sleep with a
+    // line appended to a shared log, so the deepest start/end nesting in that
+    // log is the concurrency that was actually reached. A wall-clock budget
+    // would instead measure how fast the machine is, and a CI runner starved
+    // enough to spawn processes slowly fails it even when the engine is
+    // perfectly parallel.
     let dir = TempDir::new("cli-jobs-zero");
-    let mut manifest = String::from("rule slow\n  command = sleep 0.1 && touch $out\n\n");
+    let mut manifest = String::from(
+        "rule slow\n  command = echo s >> log && sleep 0.3 && echo e >> log && touch $out\n\n",
+    );
     for i in 0..24 {
         manifest.push_str(&format!("build o{i}: slow\n"));
     }
@@ -459,13 +466,26 @@ fn unlimited_parallelism_actually_runs_in_parallel() {
     manifest.push_str("\ndefault all\n");
     dir.write("build.ninja", &manifest);
 
-    let start = std::time::Instant::now();
     let run = shuriken(&dir, &["-j0"]);
-    let elapsed = start.elapsed();
     assert_eq!(run.code, 0, "{}", run.all());
+
+    let (mut depth, mut deepest) = (0i32, 0i32);
+    for line in dir.read("log").lines() {
+        match line.trim() {
+            "s" => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            "e" => depth -= 1,
+            _ => {}
+        }
+    }
+    // Serial execution gives exactly 1. Anything more means "-j0" overlapped
+    // commands, which is the property under test; how far it overlaps depends
+    // on how many processes the host can start inside the sleep window.
     assert!(
-        elapsed < std::time::Duration::from_millis(1200),
-        "-j0 should run everything at once, took {elapsed:?}"
+        deepest > 1,
+        "-j0 ran commands one at a time (deepest overlap {deepest})"
     );
 }
 
