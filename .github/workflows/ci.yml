@@ -90,6 +90,7 @@ jobs:
       - name: Install ninja ${{ env.NINJA_VERSION }}
         run: |
           curl -sSfLO "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip"
+          mkdir -p "$HOME/.local/bin"
           unzip -q ninja-linux.zip -d "$HOME/.local/bin"
           chmod +x "$HOME/.local/bin/ninja"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
