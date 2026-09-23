@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-features --locked
+
+  msrv:
+    name: MSRV (1.87)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Must match `rust-version` in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@1.87
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets --all-features --locked
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --all-features --locked
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Builds the crate exactly as crates.io would receive it, so packaging
+      # mistakes surface on the pull request rather than on release day.
+      - run: cargo publish --dry-run --locked
+
+  differential:
+    name: Differential vs ninja
+    runs-on: ubuntu-latest
+    env:
+      NINJA_VERSION: 1.13.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # A pinned upstream release, not the distro package: the comparison
+      # covers the .ninja_log command hashes, which changed in ninja 1.12.
+      - name: Install ninja ${{ env.NINJA_VERSION }}
+        run: |
+          curl -sSfLO "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip"
+          unzip -q ninja-linux.zip -d "$HOME/.local/bin"
+          chmod +x "$HOME/.local/bin/ninja"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Check ninja version
+        run: |
+          test "$(ninja --version)" = "$NINJA_VERSION"
+      - run: cargo build --release --locked
+      - name: Behavioural differential suite
+        run: python3 dev/difftest.py target/release/shuriken
+      - name: A real C project, step by step
+        run: python3 dev/realtest.py target/release/shuriken
+      - name: Interrupt handling
+        run: python3 dev/interrupt_test.py target/release/shuriken

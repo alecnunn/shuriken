@@ -93,3 +93,33 @@ python3 dev/bench.py target/release/shuriken
 Synthetic graphs (5k and 30k independent edges, a 2k-edge chain, and 3k edges
 with a 200-header deps log); reports full-build, no-op and `-t targets` times
 for both tools.
+## Releasing to crates.io
+
+Publishing is driven by a tag. `.github/workflows/release.yml` re-runs the
+checks (a tag push does not trigger CI, which watches branches), refuses a tag
+whose version disagrees with `Cargo.toml`, and then publishes:
+
+```sh
+# 1. bump `version` in Cargo.toml, refresh Cargo.lock, commit
+cargo check
+git commit -am "release: 0.1.1"
+
+# 2. tag and push; the tag drives the publish
+git tag v0.1.1
+git push origin main v0.1.1
+```
+
+The workflow needs a `CRATES_IO_TOKEN` repository secret holding a crates.io
+API token with the `publish-update` scope (plus `publish-new` for the first
+release).
+
+Run the workflow manually (`workflow_dispatch`) for a rehearsal: it does
+everything except the publish step. Locally, the same check is
+
+```sh
+cargo publish --dry-run --locked
+cargo package --list          # what crates.io will receive
+```
+
+`dev/` and `.github/` are excluded from the packaged crate; `tests/` is kept so
+the suite can run from the published sources.

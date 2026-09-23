@@ -33,6 +33,24 @@ The library has **no dependencies** (not even `libc`) and contains no `unsafe`
 code — `#![forbid(unsafe_code)]`. The one crate-internal exception is in the
 binary, which uses two libc calls for terminal width and signal handling.
 
+## Installing
+
+One crate ships both halves. For the command-line tool:
+
+```sh
+cargo install shuriken
+```
+
+To embed the engine in your own program:
+
+```sh
+cargo add shuriken
+```
+
+Requires Rust 1.87 or newer. They are the same crate and the same version. A dependency builds only the
+library target, so embedders never compile the CLI, and the library has no
+dependencies of its own to pull in either way.
+
 ## Using the command line
 
 The CLI mirrors ninja's, including its flags, its output format, its exit codes
@@ -73,11 +91,6 @@ edges                  30001
 ```
 
 ## Using the library
-
-```toml
-[dependencies]
-shuriken = "0.1"
-```
 
 The quick path is `Engine`, which loads a manifest, keeps the logs and runs
 builds:
@@ -248,7 +261,8 @@ python3 dev/bench.py target/release/shuriken
 
 ## License
 
-MIT OR Apache-2.0.
+Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at
+your option.
 
 This is an independent implementation. ninja itself is Apache-2.0 licensed and
 was used as the specification: its file formats, command-line behaviour and
