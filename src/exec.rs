@@ -641,10 +641,14 @@ mod tests {
 
     #[test]
     fn the_pool_grows_to_run_commands_concurrently() {
-        // Regression test: workers count themselves idle before they block on
-        // the job queue, so a pool sized from `idle` alone would stall at one
-        // or two workers and run everything one at a time.
+        // Workers count themselves idle before they block on the job queue, so
+        // sizing the pool from `idle` alone can leave a job waiting behind one
+        // that a worker has already been handed. Starting a burst of commands
+        // has to produce a worker for each of them.
         let n = 6;
+        // Long enough that nothing finishes while the commands are being
+        // started; the exact duration does not matter because nothing here is
+        // timed.
         let sleep = shell(if cfg!(windows) {
             "ping -n 2 127.0.0.1 > nul"
         } else {
@@ -653,7 +657,6 @@ mod tests {
         let state = state_with_n(&sleep, n);
         let mut runner = RealCommandRunner::new(n);
 
-        let start = std::time::Instant::now();
         for i in 0..n {
             runner.start_command(&state, EdgeId(i as u32)).unwrap();
         }
@@ -667,12 +670,6 @@ mod tests {
         for _ in 0..n {
             assert!(runner.wait_for_command().unwrap().success());
         }
-        // Serially this would take n times as long.
-        assert!(
-            start.elapsed() < std::time::Duration::from_millis(300 * n as u64 / 2),
-            "commands did not overlap, took {:?}",
-            start.elapsed()
-        );
     }
 
     #[test]
