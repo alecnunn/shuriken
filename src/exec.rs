@@ -579,7 +579,11 @@ mod tests {
 
     #[test]
     fn merges_stdout_and_stderr() {
-        let state = state_with(&shell(if cfg!(windows) { "echo out & echo err 1>&2" } else { "echo out; echo err 1>&2" }));
+        let state = state_with(&shell(if cfg!(windows) {
+            "echo out & echo err 1>&2"
+        } else {
+            "echo out; echo err 1>&2"
+        }));
         let mut runner = RealCommandRunner::new(1);
         runner.start_command(&state, EdgeId(0)).unwrap();
         let result = runner.wait_for_command().unwrap();

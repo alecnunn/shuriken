@@ -8,7 +8,10 @@ use common::{
 };
 
 fn copy_rule() -> String {
-    format!("rule copy\n  command = {}\n  description = COPY $out\n\n", copy_cmd())
+    format!(
+        "rule copy\n  command = {}\n  description = COPY $out\n\n",
+        copy_cmd()
+    )
 }
 
 fn simple_project(label: &str) -> TempDir {
@@ -78,7 +81,10 @@ fn failing_command_reports_and_exits_nonzero() {
     let dir = TempDir::new("cli-failure");
     dir.write(
         "build.ninja",
-        &format!("rule fail\n  command = {}\n\nbuild out: fail\n", fail_loudly_cmd("problem", 7)),
+        &format!(
+            "rule fail\n  command = {}\n\nbuild out: fail\n",
+            fail_loudly_cmd("problem", 7)
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 7, "{}", run.all());
@@ -118,7 +124,10 @@ fn keep_going_runs_independent_work() {
 #[test]
 fn missing_input_is_reported_as_an_error() {
     let dir = TempDir::new("cli-missing-input");
-    dir.write("build.ninja", &format!("{}build out: copy nope\n", copy_rule()));
+    dir.write(
+        "build.ninja",
+        &format!("{}build out: copy nope\n", copy_rule()),
+    );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(run.code, 1);
     assert!(
@@ -177,7 +186,9 @@ fn dry_run_changes_nothing() {
 fn verbose_prints_commands() {
     let dir = simple_project("cli-verbose");
     let run = shuriken(&dir, &["-j1", "-v"]);
-    let expected = copy_cmd().replace("$in", "in.txt").replace("$out", "mid.txt");
+    let expected = copy_cmd()
+        .replace("$in", "in.txt")
+        .replace("$out", "mid.txt");
     assert!(run.stdout.contains(&expected), "{}", run.all());
     let dir = simple_project("cli-quiet");
     let run = shuriken(&dir, &["-j1", "--quiet"]);
@@ -245,7 +256,10 @@ fn chdir_and_alternate_manifest() {
     dir.write("sub/in.txt", "x\n");
     dir.write(
         "sub/custom.ninja",
-        &format!("{}build out.txt: copy in.txt\ndefault out.txt\n", copy_rule()),
+        &format!(
+            "{}build out.txt: copy in.txt\ndefault out.txt\n",
+            copy_rule()
+        ),
     );
     let run = shuriken(&dir, &["-C", "sub", "-f", "custom.ninja", "-j1"]);
     assert_eq!(run.code, 0, "{}", run.all());
@@ -461,7 +475,10 @@ fn a_very_deep_chain_does_not_overflow_the_stack() {
     // 8MiB stack, so the tool runs the build on a larger one.
     let dir = TempDir::new("cli-deep-chain");
     let depth = 20_000;
-    let mut manifest = format!("rule tch\n  command = {}\n\nbuild s0: tch in\n", touch_cmd());
+    let mut manifest = format!(
+        "rule tch\n  command = {}\n\nbuild s0: tch in\n",
+        touch_cmd()
+    );
     for i in 1..depth {
         manifest.push_str(&format!("build s{i}: tch s{}\n", i - 1));
     }
@@ -692,12 +709,18 @@ fn shared_log_is_understood_after_a_manifest_edit() {
     dir.write("in", "x\n");
     dir.write(
         "build.ninja",
-        &format!("rule copy\n  command = {}\n\nbuild old: copy in\ndefault old\n", copy_cmd()),
+        &format!(
+            "rule copy\n  command = {}\n\nbuild old: copy in\ndefault old\n",
+            copy_cmd()
+        ),
     );
     shuriken(&dir, &["-j1"]);
     dir.write(
         "build.ninja",
-        &format!("rule copy\n  command = {}\n\nbuild new: copy in\ndefault new\n", copy_cmd()),
+        &format!(
+            "rule copy\n  command = {}\n\nbuild new: copy in\ndefault new\n",
+            copy_cmd()
+        ),
     );
     let run = shuriken(&dir, &["-j1"]);
     assert_eq!(commands_run(&run), 1, "{}", run.all());

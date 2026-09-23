@@ -122,7 +122,11 @@ pub fn touch_cmd() -> &'static str {
 
 /// A `command =` body that does nothing at all successfully.
 pub fn no_op_cmd() -> &'static str {
-    if cfg!(windows) { "cmd /c exit 0" } else { "true" }
+    if cfg!(windows) {
+        "cmd /c exit 0"
+    } else {
+        "true"
+    }
 }
 
 /// A `command =` body that exits with `code` without writing anything.

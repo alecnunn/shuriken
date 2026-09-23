@@ -103,7 +103,11 @@ mod tests {
         // Canonicalization folds separators on Windows (and records that they
         // were backslashes), so the include matches manifest paths spelled
         // either way; elsewhere a backslash is just an ordinary character.
-        let expected = if cfg!(windows) { "c:/foo/bar.h" } else { "c:\\foo\\bar.h" };
+        let expected = if cfg!(windows) {
+            "c:/foo/bar.h"
+        } else {
+            "c:\\foo\\bar.h"
+        };
         assert_eq!(r.includes, vec![expected]);
         assert_eq!(r.filtered_output, "warning: something\n");
     }

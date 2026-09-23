@@ -670,7 +670,10 @@ mod tests {
         );
         tmp.write(
             "build.ninja",
-            &format!("builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n", copy_rule()),
+            &format!(
+                "builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n",
+                copy_rule()
+            ),
         );
 
         let mut engine = Engine::load(
@@ -708,7 +711,10 @@ mod tests {
         );
         tmp.write(
             "build.ninja",
-            &format!("builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n", copy_rule()),
+            &format!(
+                "builddir = {m_dir}\n{}build {m_out}: copy {m_in}\n",
+                copy_rule()
+            ),
         );
 
         let opts = || EngineOptions {
